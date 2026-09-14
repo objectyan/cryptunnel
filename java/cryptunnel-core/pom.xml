@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.objectyan</groupId>
+        <artifactId>cryptunnel-parent</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>cryptunnel-core</artifactId>
+    <packaging>jar</packaging>
+    <name>Cryptunnel Core</name>
+    <description>
+        纯 Java 核心库：AES 加解密、auth 报文编解码、Target 注册表抽象、TCP 隧道抽象。
+        不依赖 Spring，可在 JDK 8 编译运行。
+    </description>
+
+    <properties>
+        <!--
+            release=8 比单写 source/target 更严：它会同时校验 API 是否属于 JDK 8，
+            用 JDK 17 编也不会误用 JDK 9+ 的 API（如 List.of / Map.of）。
+            core 必须能在 sunrise 的 JDK 8 运行时上跑，这道闸门不能撤。
+        -->
+        <maven.compiler.release>8</maven.compiler.release>
+        <maven.compiler.source>1.8</maven.compiler.source>
+        <maven.compiler.target>1.8</maven.compiler.target>
+    </properties>
+
+    <dependencies>
+        <!--
+            国密 SM4 依赖：JDK 标准 Provider 在任何版本都不提供 SM4，只有 BouncyCastle 有。
+            设为 optional —— 不使用 SM4 时无需引入，也不会传递给宿主应用。
+            core 的「零运行时依赖」属性对默认路径（AES-CBC / AES-GCM）依然成立。
+        -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

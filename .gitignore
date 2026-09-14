@@ -1,0 +1,50 @@
+# ============================================================
+# cryptunnel — .gitignore
+# 注：本仓库有一个 Java 包名恰好叫 `target`
+#   (java/cryptunnel-core/src/{main,test}/java/.../core/target/)
+#   它是白名单源码，必须进库。下面用否定规则精确放行，
+#   切勿写笼统的 `target/` 否则会误忽略源码包。
+# ============================================================
+
+# ---- Java / Maven 构建产物 ----
+target/
+# 放行名为 target 的源码包（只在 src/main|test/java 下）
+!**/src/main/java/**/target/
+!**/src/test/java/**/target/
+
+# ---- 其他 Java 编译产物 ----
+out/
+*.class
+
+# ---- Python 产物 ----
+__pycache__/
+*.pyc
+*.pyo
+
+# ---- .NET 构建产物 ----
+**/bin/
+**/obj/
+*.cache
+*.user
+*.suo
+.vs/
+
+# ---- IDE ----
+.idea/
+.vscode/
+*.iml
+
+# ---- NuGet 本地缓存（restore 时自动重建）----
+.nuget-cache/
+.nuget-packages/
+
+# ---- 本地 agent / 工具状态（不入库）----
+.workbuddy/
+
+# ---- 发布产物（761MB，保留在本地磁盘，不进 git）----
+packaging/
+
+# ---- 操作系统文件 ----
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,14 @@
+<Solution>
+  <!-- 现役客户端（net10.0-windows / net10.0） -->
+  <Project Path="src/Cryptunnel.App/Cryptunnel.App.csproj" />
+  <Project Path="src/Cryptunnel.Core/Cryptunnel.Core.csproj" />
+
+  <!-- 验证工程：都是 main + 断言 + 退出码，不是 xunit。
+       纳入 solution 是为了「改了 Core 忘了跑校验」时 IDE 至少会一起编译。 -->
+  <Project Path="build/verify/FramingVerify/FramingVerify.csproj" />
+  <Project Path="build/verify/TunnelVerify/TunnelVerify.csproj" />
+  <Project Path="build/verify/UiVerify/UiVerify.csproj" />
+
+  <!-- 跨语言一致性校验（对 Java core 反解密文） -->
+  <Project Path="build/parity/CryptoParity/CryptoParity.csproj" />
+</Solution>

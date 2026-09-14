@@ -1,0 +1,52 @@
+# ============================================================================
+# 项目配置示例：一个文件 = 一个项目 = 一个本地端口
+#
+# 用法：复制本文件改名成 <项目名>.yaml（如 npr.yaml、srm.yaml），改里面的字段。
+# 改完在客户端里点「重载配置」即可生效，不用重启。
+#
+# !! 安全提示 !!
+# 下面的 aesKey / authKey 是从老 Java 版源码里硬编码的默认值原样搬过来的，
+# 所有用过老客户端的人手里都有这两个值。建议找服务端同学轮换一次密钥，
+# 轮换后把这里同步改掉。本文件含明文密钥，不要提交到任何代码仓库。
+#
+# 格式说明：本项目配置文件是「平铺」结构（无 project: 包裹层），
+# 与客户端编辑器写回的格式完全一致。ConfigLoader 的 RootFile 没有 project 字段，
+# 若误写成 project: 包裹，name / serverUrl / localPort 等字段会被静默丢弃，
+# 导致加载失败（"缺少 name 字段" 或 "local.port 超出范围"）。
+# 同样，端口必须写在 local: 段下（local.port），不能写成顶层的 localPort:。
+# ============================================================================
+
+schemaVersion: 1
+
+# 项目名，显示在客户端列表里。必须唯一（小写字母/数字/连字符）。
+name: crm
+
+# 服务端地址，不要带结尾的斜杠。
+# WebSocket 由此推导：http->ws，https->wss，再拼上 wsPath。
+serverUrl: http://crm.shengxingholdings.com:8081
+
+# 本地监听端口。DBeaver 里就连 127.0.0.1 的这个端口。
+# 多个项目不能撞端口，撞了后启动的那个会跳过并告警。
+local:
+  port: 13306
+
+# AES 密钥。服务端和客户端必须一致，否则 HMAC 校验会失败。
+aesKey: AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBFeQ16RjDi9jpW8gD5PQui3Z+PdHnuzZoKuRzDgh24oO7MCFnWWqmDgLgo42V567wwBpl10WpbxCT3G0nd6NO0M=
+
+# 认证密钥，独立于 aesKey。用于构造 AUTH:{authKey}:{timestamp}:{nonce}
+authKey: AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBAkwdxF5pfPamRck+X61GzVZ+bPik3Bpw5qKeC1g9f3aD1rpL7mB8sGlQJKmXd30aEWULVex272CehdnDxBr3RE=
+
+# WebSocket 端点路径。
+# 客户端默认 /ws-cryptunnel，但运行中的服务端配的是 /ws-jdbc-proxy（ws-path），
+# 两端必须一致，否则 WS 握手直接 404。HTTP 降级路径默认 /cryptunnel 与服务端
+# @RequestMapping("/cryptunnel") 一致，无需改。
+wsPath: /ws-jdbc-proxy
+
+# ---- 以下都是可选项，不写就用 00-defaults.yaml 里的值 ----
+# enabled: true              # 临时停用，列表里还在但不监听端口
+# mode: auto                 # auto | wsOnly | httpOnly
+# wsConnectTimeoutMs: 10000
+# httpReadTimeoutMs: 30000
+# autoReconnect: true
+# logEnabled: true
+# cipher: aes-256-cbc-hmac-sha256

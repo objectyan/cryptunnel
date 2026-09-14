@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.github.objectyan</groupId>
+    <artifactId>cryptunnel-parent</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+
+
+    <!--
+        ↓↓↓ 以下 name / description / url / licenses / developers / scm 六项
+        是 Maven Central 的**强制**元数据。缺任何一项，构建能过、上传能过，
+        但会在 Portal 的校验阶段被拒 —— 属于「本地全绿、发布才炸」的一类，
+        所以放在父 POM 由全部子模块继承，避免逐个模块漏配。
+    -->
+    <name>Cryptunnel Parent</name>
+    <description>
+        加密 JDBC 隧道：让本地数据库客户端（DBeaver 等）经由已有的 Web 端口，
+        以加密流量穿过防火墙访问远端 MySQL。不新开端口、报文中不含算法标识。
+    </description>
+    <url>https://github.com/objectyan/cryptunnel</url>
+    <inceptionYear>2026</inceptionYear>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>objectyan</id>
+            <name>objectyan</name>
+            <url>https://github.com/objectyan</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/objectyan/cryptunnel.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/objectyan/cryptunnel.git</developerConnection>
+        <url>https://github.com/objectyan/cryptunnel</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/objectyan/cryptunnel/issues</url>
+    </issueManagement>
+
+
+    <!--
+        默认（不带 profile）只编 core + common —— 这两个模块与 servlet 命名空间无关。
+        javax / jakarta 两套 starter 因为 import 的包名互斥（javax.servlet vs jakarta.servlet），
+        **不能同时出现在一个 reactor 里**，故各自挂在 profile 下，见下方 <profiles>。
+    -->
+    <modules>
+        <module>cryptunnel-core</module>
+        <module>cryptunnel-starter-common</module>
+    </modules>
+
+
+    <properties>
+        <!--
+            编码必须显式声明两处。只写 sourceEncoding 不够：
+            maven-compiler-plugin 读的是 maven.compiler.encoding，
+            漏配时 Maven 会用平台默认（本机 GBK）去读 UTF-8 源码，
+            中文注释会**静默损坏**（不报错，编译照过）。starter pom 曾漏过这一条。
+        -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <maven.compiler.encoding>UTF-8</maven.compiler.encoding>
+
+        <!--
+            顶层默认 spring-boot.version。boot25/jakarta 两个 profile 仍会覆盖它，
+            因此库自身构建行为不变；但**作为依赖被外部工程（如 sunrise）独立解析时**，
+            没有 profile 处于激活态，必须有一个顶层默认值，否则 starter pom 里
+            spring-boot-dependencies 的 import 会因 ${spring-boot.version} 无法替换而解析失败。
+        -->
+        <spring-boot.version>2.5.3</spring-boot.version>
+
+        <bouncycastle.version>1.78.1</bouncycastle.version>
+        <junit.version>4.13.2</junit.version>
+
+        <!-- 发布相关插件版本集中管理，避免各模块漂移 -->
+        <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
+        <maven-javadoc-plugin.version>3.6.3</maven-javadoc-plugin.version>
+        <maven-gpg-plugin.version>3.2.4</maven-gpg-plugin.version>
+        <central-publishing-plugin.version>0.8.0</central-publishing-plugin.version>
+    </properties>
+
+
+    <!--
+        统一管住内部模块间与第三方依赖的版本。子模块只写 groupId/artifactId，
+        不写 version —— 这样发布时改一处版本号即可，不会出现
+        「core 升到 1.1.0 但 starter 还引着 1.0.0」的错配。
+    -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>${project.groupId}</groupId>
+                <artifactId>cryptunnel-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${project.groupId}</groupId>
+                <artifactId>cryptunnel-starter-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>junit</groupId>
+                <artifactId>junit</artifactId>
+                <version>${junit.version}</version>
+                <scope>test</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+
+    <profiles>
+        <!--
+            boot25：javax.servlet 命名空间，Spring Boot 2.5.3。
+            **必须用 JDK 8 编译**（sunrise 主线运行时就是 JDK 8）。
+        -->
+        <profile>
+            <id>boot25</id>
+            <modules>
+                <module>cryptunnel-core</module>
+                <module>cryptunnel-starter-common</module>
+                <module>cryptunnel-starter-javax</module>
+            </modules>
+            <properties>
+                <spring-boot.version>2.5.3</spring-boot.version>
+                <servlet.api>javax</servlet.api>
+            </properties>
+        </profile>
+
+        <!--
+            jakarta：jakarta.servlet 命名空间，兼容 Spring Boot 3.x / 4.x。
+            **必须用 JDK 17 编译** —— Boot 3.5 的 class 文件是 Java 17 格式，
+            拿 JDK 8 编会报「无法访问 ConditionalOnProperty」这类误导性错误
+            （看起来像缺依赖，实为 class 版本读不动）。
+        -->
+        <profile>
+            <id>jakarta</id>
+            <modules>
+                <module>cryptunnel-core</module>
+                <module>cryptunnel-starter-common</module>
+                <module>cryptunnel-starter-jakarta</module>
+            </modules>
+            <properties>
+                <spring-boot.version>3.5.0</spring-boot.version>
+                <servlet.api>jakarta</servlet.api>
+            </properties>
+        </profile>
+
+        <!--
+            release：只在真正发版时激活（-Prelease）。
+            拆成独立 profile 的理由 —— GPG 签名会在无密钥的机器上直接失败，
+            日常 mvn install / test 不该被它拖住。
+        -->
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>${maven-gpg-plugin.version}</version>
+                        <configuration>
+                            <!-- 锁定签名主钥指纹，避免 keyring 里另一枚坏密码旧密钥被误选 -->
+                            <keyname>880A1A81030EA764109E2BAC7D055743CE30D5EF</keyname>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals><goal>sign</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>${central-publishing-plugin.version}</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <!--
+                                这个 id 必须叫 central，且与 ~/.m2/settings.xml 里
+                                <server><id>central</id> 的凭据条目对应。
+                                走 Central Portal，**不需要 distributionManagement**
+                                （老教程里的 oss.sonatype.org staging 端点已下线）。
+                            -->
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>published</waitUntil>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
+
+    <build>
+        <!--
+            source / javadoc jar 是 Central 的**强制**要求，与元数据同级重要。
+            放在父 POM 的 <plugins>（而非 pluginManagement）让所有子模块自动生效，
+            避免新增模块时忘配、直到发布才发现。
+            doclint=none：JDK 8+ 的 javadoc 校验极严，中文注释里的
+            `<` `&` 等字符会让构建整体失败，而这与产物正确性无关。
+        -->
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>${maven-source-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals><goal>jar-no-fork</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>${maven-javadoc-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals><goal>jar</goal></goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <doclint>none</doclint>
+                    <encoding>UTF-8</encoding>
+                    <charset>UTF-8</charset>
+                    <docencoding>UTF-8</docencoding>
+                    <!--
+                        必须显式写 <source>，否则 javadoc 插件会去读
+                        maven.compiler.release（core 里设为 8）并原样透传 release 标记。
+                        **JDK 8 自带的 javadoc 不认识那个标记**（它是 JDK 9+ 才有的），
+                        于是 attach-javadocs 直接失败：
+                            javadoc: 错误 - 无效的标记: [两横线]release
+                        而 Maven 只会转述一句「Exit code: 1」，真实原因得手动跑
+                        `javadoc @options @packages` 才看得到 —— 极难定位。
+
+                        后果不是"少个文档"：javadoc jar 是 Maven Central 的**强制**要求，
+                        缺了根本发不出去，而这个坑只在 `package` 及之后的阶段暴露，
+                        日常 `mvn test` 一路绿灯，很容易拖到发版当天才炸。
+
+                        用 <source> 而不是删掉 core 的 maven.compiler.release：
+                        后者是"用 JDK 17 编也不许误用 JDK 9+ API"的闸门（见 core/pom.xml:22-26），
+                        撤掉会让 JDK 8 兼容性失去编译期保护。两者只能在 javadoc 侧分开。
+                    -->
+                    <source>8</source>
+                    <release combine.self="override"/>
+                </configuration>
+            </plugin>
+        </plugins>
+
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+
+</project>

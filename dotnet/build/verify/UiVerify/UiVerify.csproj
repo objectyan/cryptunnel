@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ProjectEditorWindow 的运行时验收。
+
+    为什么必须单独跑：XAML 里的 ControlTemplate / StaticResource / 事件绑定
+    全是运行时解析的，编译期一律不检查。本轮为深色主题重写了整套 ComboBox 模板
+    （默认模板在深色背景上是白底黑字，不可用），任何一个 StaticResource 拼错、
+    或 TemplateBinding 指到不存在的属性，都要等窗口真正构造时才抛。
+
+    这个失效模式在本项目有前科：曾因 Run.Text 默认 TwoWay 绑到只读属性，
+    Show() 抛异常导致进程静默退出 + 留下托盘幽灵图标。
+    「能编译」离「能显示」还差一次实例化。
+
+    UseWPF + net10.0-windows 是引用 App 工程的硬性要求。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>UiVerify</AssemblyName>
+    <RootNamespace>UiVerify</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Cryptunnel.App\Cryptunnel.App.csproj" />
+  </ItemGroup>
+
+</Project>

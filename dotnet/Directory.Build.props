@@ -1,0 +1,22 @@
+<Project>
+  <!--
+    临时兜底：.NET SDK 10.0.400 自带 NuGet 7.9 的 GetRestoreSettingsTask 在评估
+    NuGet.targets 时会触发 "Path.Combine(null, ...)" NRE，根因是 BaseIntermediateOutputPath
+    在 DefaultProps 设置之前 NuGet.targets 已被解析。
+
+    结构重构后全部 .NET 工程都收在 dotnet/ 这一棵树下，故只需这一份
+    （此前仓库根另有一份，因为 MSBuild 的 Directory.Build.props 查找会在
+    「找到第一个」时停止且不向上合并，两棵树各需一份）。
+    仅当 SDK >= 10.0.300 时需要；升级到 NuGet 8 后可删。
+
+    注意：这条 props 治的是 **MSBuild 属性** 那一半问题。
+    沙箱里另有一类同样报 "Value cannot be null. (Parameter 'path1')" 的失败，
+    根因是 APPDATA / ProgramFiles 等**环境变量**被清空，本文件治不了，
+    需在命令行用 env "APPDATA=..." 显式补回。两者症状相同、成因不同，别混。
+  -->
+  <PropertyGroup>
+    <BaseIntermediateOutputPath Condition="'$(BaseIntermediateOutputPath)' == ''">obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath Condition="'$(BaseOutputPath)' == ''">bin\</BaseOutputPath>
+    <RestoreUseLegacyDependencyResolver Condition="'$(RestoreUseLegacyDependencyResolver)' == '' and '$(MSBuildVersion)' >= '17.10'">true</RestoreUseLegacyDependencyResolver>
+  </PropertyGroup>
+</Project>

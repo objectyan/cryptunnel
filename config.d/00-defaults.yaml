@@ -1,0 +1,84 @@
+schemaVersion: 1
+
+defaults:
+  local:
+    address: 127.0.0.1
+
+    # 是否允许把 address 设成非回环地址（0.0.0.0 / :: / 具体网卡 IP）。
+    # 默认 false —— 不写这一项时，非回环监听会被拒绝，程序启动失败并给出改法。
+    #
+    # 【为什么默认拒绝】监听非回环地址意味着局域网内任意机器都能连上本机的
+    # local.port，并通过本隧道访问内网数据库。关键在于：连过来的人
+    # 不需要知道 aesKey，也不需要知道 authKey —— 本客户端会用你在这里
+    # 配置的密钥替对方完成认证。换句话说，这一项是本客户端唯一一个能让
+    # 本机之外的人穿透防火墙的配置。
+    #
+    # 【什么时候才该打开】只有当你确实要把这台机器当作团队共享的跳板，
+    # 并且已经用系统防火墙限定了来源 IP 时，才把它设成 true。
+    # 仅仅是自己用 DBeaver 连本机，不需要动这一项。
+    #
+    # 写在这里表示对所有项目生效；也可以只写在单个项目的 local: 段下。
+    #
+    # allowNonLoopback: false
+
+  wsPath: /ws-cryptunnel
+
+  transport:
+    mode: auto
+    allowFallback: true
+
+  timeouts:
+    wsConnectMs: 10000
+    httpConnectMs: 10000
+    httpReadMs: 30000
+    authResponseMs: 3000
+    reconnectDelayMs: 3000
+
+  reconnect:
+    enabled: true
+    maxAttempts: 0
+
+  logging:
+    level: info
+    maxFileSizeMb: 10
+    retainDays: 7
+
+  chunkSize: 4096
+
+  # 隧道加密算法。默认 aes-256-cbc-hmac-sha256（不写这一项即为此值）。
+  #
+  # 可选：
+  #   aes-256-cbc-hmac-sha256   默认，与所有历史版本兼容
+  #   aes-256-gcm               AEAD，帧更短（无独立 HMAC 字段）
+  #   sm4-cbc-hmac-sha256       国密 SM4（别名：sm4）
+  #
+  # 【重要】此值必须与服务端 cryptunnel.cipher 完全一致。
+  # 按 ADR-0003，报文内不携带任何算法标识（防 DPI 指纹识别），
+  # 两端无法自动协商。配错的表现是服务端返回 close reason
+  # "Auth decrypt failed" —— 该提示与 aesKey 配错完全无法区分。
+  #
+  # cipher: aes-256-cbc-hmac-sha256
+
+  # 周期性健康检查。默认关闭（不写这一段即为关闭）。
+  #
+  # 【它做什么】按间隔跑一次完整链路探活：连服务端 WebSocket → 加密认证 →
+  # 等服务端把 MySQL 握手包推过来 → 解析出 MySQL 版本 → 主动断开。
+  # 一次跑完能同时验到三件事：网络/WAF 是否放行、authKey+aesKey+cipher
+  # 三项是否与服务端一致、服务端到 MySQL 是否真的通。
+  # 结果显示在主界面状态列下方（「链路正常 21:05」），
+  # 并且只在 正常↔异常 跳变时写一行日志 —— 持续正常时不产生任何日志。
+  #
+  # 【为什么默认关闭】每跑一次，服务端就会真实地建立并断开一条 MySQL 连接。
+  # 这会占用服务端 maxConnections 名额，也会让 MySQL 的 Connections
+  # 计数持续增长。链路本身是稳定的时候，这笔开销买不到什么。
+  # 建议只在排查间歇性断线时临时打开。
+  #
+  # 【intervalSec】检查间隔（秒），默认 300。最小 30 —— 写得比 30 小会被
+  # 直接拒绝加载而不是悄悄夹到 30，否则配置文件里的数字与实际行为不一致，
+  # 下次排查时又多一层误导。
+  #
+  # 写在这里对所有项目生效；也可以只写在单个项目下，粒度更细。
+  #
+  # health:
+  #   enabled: false
+  #   intervalSec: 300

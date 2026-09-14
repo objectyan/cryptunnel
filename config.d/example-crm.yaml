@@ -1,0 +1,14 @@
+# 示例项目（复制本文件并改名，例如 crm.yaml，再改成你自己的配置）
+# 注意：aesKey / authKey 是明文密钥，本文件请勿提交到公共仓库。
+schemaVersion: 1
+
+name: example-crm            # 必填，唯一，[a-z0-9-]+；用作日志前缀与界面标识
+displayName: 示例 CRM 库      # 可选，界面显示名
+enabled: false               # 示例默认关闭；改成 true 并填好下方密钥后即可启动
+
+serverUrl: https://your-crm-server:8081   # 必填，http/https，末尾不带斜杠
+aesKey: "把这里换成你的 AES 密钥"
+authKey: "把这里换成你的 认证密钥"
+
+local:
+  port: 13306                # 必填，1024-65535，各项目间唯一；DBeaver 连 localhost:13306

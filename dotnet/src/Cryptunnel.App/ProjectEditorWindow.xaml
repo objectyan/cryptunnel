@@ -1,0 +1,448 @@
+<Window x:Class="Cryptunnel.App.ProjectEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        mc:Ignorable="d"
+        Title="新建项目" Height="762" Width="600"
+        Background="#080a0f" Foreground="#eef2f8"
+        FontFamily="Segoe UI, Microsoft YaHei, sans-serif"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        WindowStyle="None" AllowsTransparency="False">
+    <Window.Resources>
+        <!-- 文本三档 -->
+        <SolidColorBrush x:Key="Tx1" Color="#eef2f8"/>
+        <SolidColorBrush x:Key="Tx2" Color="#9aa5bb"/>
+        <SolidColorBrush x:Key="Tx3" Color="#5a6680"/>
+        <SolidColorBrush x:Key="Accent" Color="#5b9cff"/>
+        <SolidColorBrush x:Key="Accent2" Color="#8b6cff"/>
+        <SolidColorBrush x:Key="Danger" Color="#ff5d6c"/>
+
+        <!-- 描边 -->
+        <SolidColorBrush x:Key="Hair" Color="#ffffff" Opacity="0.10"/>
+        <SolidColorBrush x:Key="Hair2" Color="#ffffff" Opacity="0.18"/>
+        <SolidColorBrush x:Key="InputBorder" Color="#ffffff" Opacity="0.12"/>
+        <SolidColorBrush x:Key="ScrollThumb" Color="#3a4358"/>
+
+        <!-- 表面（关键：分层实色，告别「水泥板」） -->
+        <LinearGradientBrush x:Key="WinBg" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#0b0e16" Offset="0"/>
+            <GradientStop Color="#070a10" Offset="1"/>
+        </LinearGradientBrush>
+        <LinearGradientBrush x:Key="CardBg" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#141a26" Offset="0"/>
+            <GradientStop Color="#10141d" Offset="1"/>
+        </LinearGradientBrush>
+        <SolidColorBrush x:Key="InputBg" Color="#1c2230"/>
+        <SolidColorBrush x:Key="InputBgHover" Color="#222a3a"/>
+        <SolidColorBrush x:Key="BtnBg" Color="#1f2638"/>
+        <LinearGradientBrush x:Key="AccentGrad" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#5b9cff"/><GradientStop Color="#8b6cff" Offset="1"/>
+        </LinearGradientBrush>
+
+        <Style TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="{StaticResource Tx1}"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="FontSize" Value="12.5"/>
+        </Style>
+
+        <!-- 输入框：纯白文字 + 显式 Foreground 绑定 + 紧凑高度（v1.2.10：padding 11,7→10,4 / MinHeight 34→28） -->
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{StaticResource InputBg}"/>
+            <Setter Property="Foreground" Value="#ffffff"/>
+            <Setter Property="BorderBrush" Value="{StaticResource InputBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="CaretBrush" Value="{StaticResource Accent}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" SnapsToDevicePixels="True">
+                            <ScrollViewer Margin="{TemplateBinding Padding}" x:Name="PART_ContentHost" Focusable="False" Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Setter TargetName="Bd" Property="Effect">
+                                    <Setter.Value>
+                                        <DropShadowEffect Color="#5b9cff" BlurRadius="12" ShadowDepth="0" Opacity="0.4"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource InputBgHover}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 自定义玻璃复选框 -->
+        <Style x:Key="GlassCheck" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource Tx1}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal">
+                            <Border x:Name="Box" Width="16" Height="16" CornerRadius="4" Background="{StaticResource InputBg}" BorderBrush="{StaticResource InputBorder}" BorderThickness="1" VerticalAlignment="Center">
+                                <Path x:Name="Check" Data="M2,6 L6,10 L12,3" Stroke="#ffffff" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Stretch="None" Width="14" Height="14" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                            </Border>
+                            <ContentPresenter x:Name="Cp" Margin="8,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="{StaticResource AccentGrad}"/>
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 深色下拉框：默认 ComboBox 模板在深色背景上是白底黑字，必须整套重写 -->
+        <Style x:Key="GlassCombo" TargetType="ComboBox">
+            <Setter Property="Background" Value="{StaticResource InputBg}"/>
+            <Setter Property="Foreground" Value="#ffffff"/>
+            <Setter Property="BorderBrush" Value="{StaticResource InputBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="Toggle" Focusable="False" ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="Bd" Background="{StaticResource InputBg}"
+                                                BorderBrush="{StaticResource InputBorder}" BorderThickness="1"
+                                                CornerRadius="8" SnapsToDevicePixels="True">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="22"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Path Grid.Column="1" Data="M0,0 L4,4 L8,0" Stroke="{StaticResource Tx2}"
+                                                      StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource InputBgHover}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter Margin="10,0,26,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
+                            <Popup x:Name="PART_Popup" AllowsTransparency="True" Placement="Bottom"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}" Focusable="False" PopupAnimation="Slide">
+                                <Border Background="#1c2230" BorderBrush="{StaticResource Hair2}" BorderThickness="1"
+                                        CornerRadius="8" MinWidth="{TemplateBinding ActualWidth}" Margin="0,4,0,0">
+                                    <Border.Effect>
+                                        <DropShadowEffect Color="#000000" BlurRadius="18" ShadowDepth="2" Opacity="0.6"/>
+                                    </Border.Effect>
+                                    <StackPanel IsItemsHost="True" Margin="4"/>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="GlassComboItem" TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="#ffffff"/>
+            <Setter Property="Padding" Value="9,6"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2a3450"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#33406b"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DlgBtn" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource BtnBg}"/>
+            <Setter Property="Foreground" Value="{StaticResource Tx1}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Hair2}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="MinWidth" Value="72"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource InputBgHover}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource Accent}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="PrimaryBtn" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource AccentGrad}"/>
+            <Setter Property="Foreground" Value="#ffffff"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="22,8"/>
+            <Setter Property="MinWidth" Value="100"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="9">
+                            <Border.Effect>
+                                <DropShadowEffect Color="#5b9cff" BlurRadius="18" ShadowDepth="0" Opacity="0.45"/>
+                            </Border.Effect>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#7aaeff"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Border Background="{StaticResource WinBg}"/>
+        <Ellipse Width="420" Height="420" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-180,-140,0" Opacity="0.18">
+            <Ellipse.Fill>
+                <RadialGradientBrush>
+                    <GradientStop Color="#7c5cff" Offset="0"/>
+                    <GradientStop Color="#007c5cff" Offset="1"/>
+                </RadialGradientBrush>
+            </Ellipse.Fill>
+        </Ellipse>
+
+        <Grid Margin="20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- 标题栏 -->
+            <Border Grid.Row="0" Height="40" Background="Transparent" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Width="26" Height="26" CornerRadius="7">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#8b6cff"/><GradientStop Color="#5b9cff" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <Border.Effect>
+                                <DropShadowEffect Color="#5b9cff" BlurRadius="14" ShadowDepth="0" Opacity="0.55"/>
+                            </Border.Effect>
+                            <TextBlock Text="J" Foreground="#ffffff" FontWeight="Bold" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" VerticalAlignment="Center" Margin="10,0,0,0" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Tx1}"/>
+                    </StackPanel>
+                    <Button Grid.Column="1" Width="30" Height="26" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Tx2}" FontSize="13" Cursor="Hand" Click="BtnClose_Click" Content="✕">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{TemplateBinding Background}" CornerRadius="7"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="{StaticResource Danger}"/>
+                                        <Setter Property="Foreground" Value="#ffffff"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- 卡片：实色磨砂面板，不再需要 ScrollViewer -->
+            <Border Grid.Row="1" CornerRadius="14" Padding="22,18" Margin="0,12,0,0" BorderThickness="1" BorderBrush="{StaticResource Hair}">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#141a26" Offset="0"/>
+                        <GradientStop Color="#10141d" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+                <Border.Effect>
+                    <DropShadowEffect Color="#000000" BlurRadius="32" ShadowDepth="0" Opacity="0.5"/>
+                </Border.Effect>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="96"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>  <!-- 章节头 -->
+                        <RowDefinition Height="Auto"/>  <!-- 名称 -->
+                        <RowDefinition Height="Auto"/>  <!-- 显示名 -->
+                        <RowDefinition Height="Auto"/>  <!-- URL -->
+                        <RowDefinition Height="Auto"/>  <!-- WS 路径 -->
+                        <RowDefinition Height="Auto"/>  <!-- 本地端口 -->
+                        <RowDefinition Height="Auto"/>  <!-- 监听地址 -->
+                        <RowDefinition Height="Auto"/>  <!-- 非回环授权 -->
+                        <RowDefinition Height="Auto"/>  <!-- 地址风险提示 -->
+                        <RowDefinition Height="Auto"/>  <!-- AES -->
+                        <RowDefinition Height="Auto"/>  <!-- 认证 -->
+                        <RowDefinition Height="Auto"/>  <!-- 加密算法 -->
+                        <RowDefinition Height="Auto"/>  <!-- 算法提示 -->
+                        <RowDefinition Height="Auto"/>  <!-- 启用 -->
+                    </Grid.RowDefinitions>
+
+                    <!-- 章节头 -->
+                    <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,12">
+                        <Border Width="4" Height="16" CornerRadius="2" Background="{StaticResource AccentGrad}" Margin="0,0,9,0"/>
+                        <TextBlock Text="连接配置" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Tx1}"/>
+                        <TextBlock Text="· 必填" Foreground="{StaticResource Accent}" FontSize="11" Margin="7,1,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- 名称 -->
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="名称" Foreground="{StaticResource Tx2}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="*" Foreground="{StaticResource Accent}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" FontSize="13" FontWeight="Bold"/>
+                    <TextBox  Grid.Row="1" Grid.Column="1" x:Name="NameBox" Margin="0,0,0,6"
+                              ToolTip="小写字母/数字/连字符 [a-z0-9-]+，作为文件名与日志前缀"/>
+
+                    <!-- 显示名 -->
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="显示名" Foreground="{StaticResource Tx2}" VerticalAlignment="Center"/>
+                    <TextBox  Grid.Row="2" Grid.Column="1" x:Name="DisplayBox" Margin="0,0,0,6"
+                              ToolTip="界面显示名，留空则用名称"/>
+
+                    <!-- 服务端 URL -->
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="服务端 URL" Foreground="{StaticResource Tx2}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="*" Foreground="{StaticResource Accent}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" FontSize="13" FontWeight="Bold"/>
+                    <TextBox  Grid.Row="3" Grid.Column="1" x:Name="UrlBox" Margin="0,0,0,6"
+                              ToolTip="http(s)://host:port，末尾不要带 /ws 路径（应用自动拼接）"/>
+
+                    <!-- WS 路径 -->
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="WS 路径" Foreground="{StaticResource Tx2}" VerticalAlignment="Center"/>
+                    <TextBox  Grid.Row="4" Grid.Column="1" x:Name="WsPathBox" Text="/ws-cryptunnel" Margin="0,0,0,6"
+                              ToolTip="WebSocket 端点路径，默认 /ws-cryptunnel；服务端挂不同前缀时改这里"/>
+
+                    <!-- 本地端口 -->
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="本地端口" Foreground="{StaticResource Tx2}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="*" Foreground="{StaticResource Accent}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" FontSize="13" FontWeight="Bold"/>
+                    <TextBox  Grid.Row="5" Grid.Column="1" x:Name="PortBox" Margin="0,0,0,6"
+                              ToolTip="1024-65535，与其他项目唯一"/>
+
+                    <!-- 监听地址 -->
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="监听地址" Foreground="{StaticResource Tx2}" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="6" Grid.Column="1" x:Name="AddressBox" Margin="0,0,0,4" IsEditable="True"
+                              Style="{StaticResource GlassCombo}" ItemContainerStyle="{StaticResource GlassComboItem}"
+                              SelectionChanged="AddressBox_Changed"
+                              ToolTip="默认 127.0.0.1（仅本机可连）。填 0.0.0.0 或网卡 IP 需勾选下方授权，否则保存后启动会被拒绝。"/>
+
+                    <!-- 非回环授权：勾选才允许局域网访问 -->
+                    <CheckBox Grid.Row="7" Grid.Column="1" x:Name="AllowNonLoopbackBox"
+                              Style="{StaticResource GlassCheck}" Margin="0,2,0,4"
+                              Content="允许局域网内其它机器连接（非回环监听）"
+                              Checked="AllowNonLoopbackBox_Changed" Unchecked="AllowNonLoopbackBox_Changed"/>
+
+                    <!-- 地址风险提示 -->
+                    <TextBlock Grid.Row="8" Grid.Column="1" x:Name="AddressHint" Margin="0,0,0,8"
+                               FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource Tx3}"/>
+
+                    <!-- AES 密钥 -->
+                    <TextBlock Grid.Row="9" Grid.Column="0" Text="AES 密钥" Foreground="{StaticResource Tx2}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Row="9" Grid.Column="0" Text="*" Foreground="{StaticResource Accent}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" FontSize="13" FontWeight="Bold"/>
+                    <DockPanel Grid.Row="9" Grid.Column="1" Margin="0,0,0,6" LastChildFill="True">
+                        <Button DockPanel.Dock="Right" Content="复制" Click="BtnCopyAes_Click" Margin="6,0,0,0" Style="{StaticResource DlgBtn}"/>
+                        <Button DockPanel.Dock="Right" Content="生成" Click="BtnGenAes_Click" Margin="6,0,0,0" Style="{StaticResource DlgBtn}"/>
+                        <TextBox x:Name="AesBox" FontFamily="Consolas, Courier New" FontSize="12"/>
+                    </DockPanel>
+
+                    <!-- 认证密钥 -->
+                    <TextBlock Grid.Row="10" Grid.Column="0" Text="认证密钥" Foreground="{StaticResource Tx2}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Row="10" Grid.Column="0" Text="*" Foreground="{StaticResource Accent}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" FontSize="13" FontWeight="Bold"/>
+                    <DockPanel Grid.Row="10" Grid.Column="1" Margin="0,0,0,6" LastChildFill="True">
+                        <Button DockPanel.Dock="Right" Content="复制" Click="BtnCopyAuth_Click" Margin="6,0,0,0" Style="{StaticResource DlgBtn}"/>
+                        <Button DockPanel.Dock="Right" Content="生成" Click="BtnGenAuth_Click" Margin="6,0,0,0" Style="{StaticResource DlgBtn}"/>
+                        <TextBox x:Name="AuthBox" FontFamily="Consolas, Courier New" FontSize="12"/>
+                    </DockPanel>
+
+                    <!-- 加密算法 -->
+                    <TextBlock Grid.Row="11" Grid.Column="0" Text="加密算法" Foreground="{StaticResource Tx2}" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="11" Grid.Column="1" x:Name="CipherBox" Margin="0,0,0,4"
+                              Style="{StaticResource GlassCombo}" ItemContainerStyle="{StaticResource GlassComboItem}"
+                              SelectionChanged="CipherBox_SelectionChanged"
+                              ToolTip="必须与服务端 cryptunnel.cipher 配成同一个值。报文内不含算法标识，两端不一致时无法自动协商。"/>
+
+                    <!-- 算法提示：非默认算法时高亮，提醒同步改服务端 -->
+                    <TextBlock Grid.Row="12" Grid.Column="1" x:Name="CipherHint" Margin="0,0,0,8"
+                               FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource Tx3}"/>
+
+                    <!-- 启用 -->
+                    <CheckBox Grid.Row="13" Grid.Column="1" x:Name="EnabledBox" IsChecked="True"
+                              Style="{StaticResource GlassCheck}" Content="项目创建后立即启用"
+                              VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+
+            <!-- 操作栏 -->
+            <StackPanel Grid.Row="2" Margin="0,14,0,0">
+                <TextBlock x:Name="ErrorText" Foreground="{StaticResource Danger}" TextWrapping="Wrap" Margin="0,0,0,10" Visibility="Collapsed"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="取消" Click="BtnCancel_Click" Style="{StaticResource DlgBtn}" Padding="18,7"/>
+                    <Button Content="保存" Click="BtnSave_Click" Style="{StaticResource PrimaryBtn}" Margin="12,0,0,0" IsDefault="True"/>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

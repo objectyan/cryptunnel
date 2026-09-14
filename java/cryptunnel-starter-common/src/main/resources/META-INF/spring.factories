@@ -1,0 +1,2 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+io.github.objectyan.cryptunnel.starter.CryptunnelAutoConfiguration

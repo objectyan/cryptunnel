@@ -1,0 +1,5 @@
+# 编译与运行中间产物，不入库
+out/
+out-reverse/
+CryptoParity/bin/
+CryptoParity/obj/

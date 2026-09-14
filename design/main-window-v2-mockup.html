@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cryptunnel 隧道客户端 · 视觉稿 v2</title>
+<style>
+  :root{
+    /* 背景层级 */
+    --bg-app:#0e1116;
+    --bg-title:#0b0e12;
+    --bg-panel:#151a21;
+    --bg-card:#1a212b;
+    --bg-elev:#1f2733;
+    --bg-hover:#222b38;
+    --border:#232b36;
+    --border-soft:#1c232d;
+    /* 文字层级 */
+    --tx-1:#e6e9ef;
+    --tx-2:#9aa7b4;
+    --tx-3:#5f6b7a;
+    /* 强调 + 语义 */
+    --accent:#4c8dff;
+    --accent-weak:rgba(76,141,255,.16);
+    --success:#3fb950;
+    --warn:#d29922;
+    --danger:#f85149;
+    --radius:8px;
+    --radius-sm:6px;
+    --font:'Segoe UI Variable','Segoe UI',system-ui,'Microsoft YaHei',sans-serif;
+    --mono:'Cascadia Code','JetBrains Mono',Consolas,'Courier New',monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:#05070a;}
+  .window{
+    width:1280px;height:720px;margin:24px auto;border-radius:12px;overflow:hidden;
+    background:var(--bg-app);color:var(--tx-1);font-family:var(--font);
+    box-shadow:0 24px 60px rgba(0,0,0,.6);border:1px solid #000;
+    display:flex;flex-direction:column;
+  }
+  /* 标题栏 */
+  .titlebar{height:40px;flex:0 0 40px;background:var(--bg-title);
+    display:flex;align-items:center;padding:0 12px;border-bottom:1px solid var(--border-soft);}
+  .titlebar .ico{width:18px;height:18px;border-radius:5px;background:var(--success);
+    color:#06210f;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;margin-right:10px;}
+  .titlebar .t{font-size:13px;font-weight:600;letter-spacing:.2px;}
+  .titlebar .spacer{flex:1;}
+  .winbtn{width:34px;height:26px;border:none;background:transparent;color:var(--tx-2);
+    font-size:14px;cursor:pointer;border-radius:5px;}
+  .winbtn:hover{background:var(--bg-hover);color:var(--tx-1);}
+  .winbtn.close:hover{background:var(--danger);color:#fff;}
+
+  /* 工具栏 */
+  .toolbar{flex:0 0 auto;display:flex;align-items:center;gap:10px;
+    padding:12px 16px;background:var(--bg-panel);border-bottom:1px solid var(--border-soft);}
+  .chip{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:20px;
+    background:var(--bg-card);border:1px solid var(--border);font-size:12.5px;color:var(--tx-2);}
+  .chip b{color:var(--tx-1);font-weight:600;}
+  .chip .k{color:var(--tx-3);}
+  .toolbar .dir{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    -webkit-mask-image:linear-gradient(to right,#000 70%,transparent);}
+  .grow{flex:1;}
+  .btn{border:1px solid var(--border);background:var(--bg-card);color:var(--tx-1);
+    padding:7px 13px;border-radius:var(--radius-sm);font-size:12.5px;cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px;transition:.15s;}
+  .btn:hover{background:var(--bg-hover);border-color:#33404f;}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .btn.primary:hover{filter:brightness(1.08);}
+  .switch{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--tx-2);cursor:pointer;
+    padding:6px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border);}
+  .switch .dot{width:30px;height:17px;border-radius:9px;background:#39424f;position:relative;transition:.15s;}
+  .switch .dot::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;
+    background:#cfd6df;transition:.15s;}
+  .switch.on .dot{background:var(--accent);}
+  .switch.on .dot::after{left:15px;background:#fff;}
+
+  /* 主区 */
+  .main{flex:1;padding:16px;min-height:0;display:flex;}
+  .gridcard{flex:1;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);
+    overflow:hidden;display:flex;flex-direction:column;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{text-align:left;padding:11px 14px;background:var(--bg-title);color:var(--tx-3);
+    font-size:11px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;border-bottom:1px solid var(--border);}
+  tbody td{padding:10px 14px;border-bottom:1px solid var(--border-soft);color:var(--tx-1);}
+  tbody tr:hover{background:var(--bg-hover);}
+  .mono{font-family:var(--mono);font-size:12.5px;}
+  .pill{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;}
+  .pipdot{width:8px;height:8px;border-radius:50%;}
+  .st-ok{color:var(--success);} .st-ok .pipdot{background:var(--success);box-shadow:0 0 8px var(--success);}
+  .st-warn{color:var(--warn);} .st-warn .pipdot{background:var(--warn);}
+  .st-err{color:var(--danger);} .st-err .pipdot{background:var(--danger);}
+  .arrow-d{color:var(--success);} .arrow-u{color:var(--warn);}
+  .count{display:inline-flex;min-width:22px;justify-content:center;padding:1px 7px;border-radius:10px;
+    font-size:12px;font-weight:600;}
+  .count.err{background:rgba(248,81,73,.16);color:var(--danger);}
+  .count.warn{background:rgba(210,153,34,.16);color:var(--warn);}
+  .op{display:flex;gap:6px;}
+  .op .btn{padding:5px 11px;font-size:12px;}
+
+  /* 日志区 */
+  .log{flex:0 0 232px;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);
+    margin:0 16px 16px;display:flex;flex-direction:column;overflow:hidden;}
+  .logbar{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border-soft);}
+  .logbar .lt{font-size:13px;font-weight:600;color:var(--tx-1);margin-right:4px;}
+  .field{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--tx-3);}
+  select,input.search{background:var(--bg-card);color:var(--tx-1);border:1px solid var(--border);
+    border-radius:var(--radius-sm);padding:6px 10px;font-size:12.5px;font-family:var(--font);outline:none;}
+  select:focus,input.search:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-weak);}
+  input.search{width:210px;}
+  input.search::placeholder{color:var(--tx-3);}
+  .loglist{flex:1;overflow:auto;padding:8px 12px;font-family:var(--mono);font-size:12.5px;line-height:1.7;}
+  .logline{white-space:pre;color:var(--tx-2);}
+  .logline .tm{color:var(--tx-3);}
+  .logline .pr{color:var(--tx-2);}
+  .tag{display:inline-block;min-width:34px;text-align:center;padding:0 6px;border-radius:4px;font-size:11px;font-weight:600;margin-right:6px;}
+  .tag.info{background:rgba(76,141,255,.16);color:var(--accent);}
+  .tag.warn{background:rgba(210,153,34,.16);color:var(--warn);}
+  .tag.err{background:rgba(248,81,73,.16);color:var(--danger);}
+  .tag.dbg{background:rgba(95,107,122,.18);color:var(--tx-3);}
+  .logline.info .msg{color:var(--tx-1);}
+  .logline.warn .msg{color:var(--warn);}
+  .logline.err .msg{color:var(--danger);}
+  .logline.dbg .msg{color:var(--tx-3);}
+</style>
+</head>
+<body>
+  <div class="window">
+    <!-- 标题栏 -->
+    <div class="titlebar">
+      <div class="ico">J</div>
+      <div class="t">Cryptunnel 隧道客户端</div>
+      <div class="spacer"></div>
+      <button class="winbtn">—</button>
+      <button class="winbtn">▢</button>
+      <button class="winbtn close">✕</button>
+    </div>
+
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <div class="chip"><span class="k">模式</span><b>安装</b></div>
+      <div class="chip"><span class="k">配置目录</span><span class="dir">C:\Users\OY\AppData\Roaming\Sunrise\Cryptunnel\config.d</span></div>
+      <div class="chip">v1.1.2</div>
+      <div class="grow"></div>
+      <button class="btn primary">↻ 重载配置</button>
+      <button class="btn">＋ 新建项目</button>
+      <button class="btn">配置目录</button>
+      <button class="btn">日志目录</button>
+      <div class="switch on"><span class="dot"></span>开机启动</div>
+      <button class="btn">退出</button>
+    </div>
+
+    <!-- 主表格 -->
+    <div class="main">
+      <div class="gridcard">
+        <table>
+          <thead>
+            <tr>
+              <th>名称</th><th>显示名</th><th>端口</th><th>服务端</th><th>状态</th><th>传输</th>
+              <th>连接数</th><th>流量</th><th>运行时长</th><th>错误</th><th>警告</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="mono">crm</td>
+              <td>CRM 生产库</td>
+              <td class="mono">13306</td>
+              <td class="mono" style="color:var(--tx-2)">https://crm.internal:8081</td>
+              <td><span class="pill st-ok"><span class="pipdot"></span>已连接</span></td>
+              <td style="color:var(--tx-2)">WebSocket</td>
+              <td class="mono">2</td>
+              <td class="mono"><span class="arrow-d">↓ 1.02 MB</span> &nbsp; <span class="arrow-u">↑ 318 KB</span></td>
+              <td class="mono" style="color:var(--tx-2)">01:24:09</td>
+              <td><span class="count err">0</span></td>
+              <td><span class="count warn">1</span></td>
+              <td><div class="op"><button class="btn">停止</button><button class="btn">测试</button><button class="btn">删除</button></div></td>
+            </tr>
+            <tr>
+              <td class="mono">erp</td>
+              <td>ERP 测试库</td>
+              <td class="mono">13307</td>
+              <td class="mono" style="color:var(--tx-2)">https://erp.internal:8081</td>
+              <td><span class="pill st-warn"><span class="pipdot"></span>重连中</span></td>
+              <td style="color:var(--tx-2)">HTTP</td>
+              <td class="mono">0</td>
+              <td class="mono" style="color:var(--tx-3)">—</td>
+              <td class="mono" style="color:var(--tx-2)">—</td>
+              <td><span class="count err">2</span></td>
+              <td><span class="count warn">0</span></td>
+              <td><div class="op"><button class="btn">停止</button><button class="btn">测试</button><button class="btn">删除</button></div></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 日志区 -->
+    <div class="log">
+      <div class="logbar">
+        <span class="lt">实时日志</span>
+        <div class="field">项目<select><option>全部项目</option><option>CRM 生产库</option><option>ERP 测试库</option></select></div>
+        <div class="field">级别<select><option>全部</option><option>信息</option><option>警告</option><option>错误</option></select></div>
+        <input class="search" placeholder="搜索日志内容（支持正则）" />
+        <div class="switch on"><span class="dot"></span>自动滚动</div>
+        <div class="grow"></div>
+        <button class="btn">清空</button>
+      </div>
+      <div class="loglist">
+        <div class="logline dbg"><span class="tm">08:31:49</span> <span class="pr">[system]</span> <span class="tag dbg">调试</span><span class="msg">启动模式：安装，配置目录 C:\Users\OY\AppData\Roaming\Sunrise\Cryptunnel\config.d</span></div>
+        <div class="logline info"><span class="tm">08:31:49</span> <span class="pr">[crm]</span> <span class="tag info">信息</span><span class="msg">监听 localhost:13306，DBeaver 请连接 localhost:13306</span></div>
+        <div class="logline warn"><span class="tm">08:32:10</span> <span class="pr">[erp]</span> <span class="tag warn">警告</span><span class="msg">WebSocket 连接失败（可能被 WAF 拦截）：404</span></div>
+        <div class="logline err"><span class="tm">08:32:11</span> <span class="pr">[erp]</span> <span class="tag err">错误</span><span class="msg">隧道建立失败，请检查服务器地址与网络</span></div>
+        <div class="logline info"><span class="tm">08:32:40</span> <span class="pr">[crm]</span> <span class="tag info">信息</span><span class="msg">WebSocket 加密认证成功</span></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

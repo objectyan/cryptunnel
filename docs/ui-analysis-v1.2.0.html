@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Cryptunnel 隧道客户端 v1.2.0 界面分析与优化方案</title>
+<style>
+  :root{
+    --bg:#0e1320; --panel:#141b2b; --panel2:#1a2233; --hair:#ffffff20; --hair2:#ffffff10;
+    --tx1:#eaf0fb; --tx2:#a7b3c7; --tx3:#828ea3; --accent:#4c8dff; --accent2:#7c5cff;
+    --ok:#34e3a0; --warn:#ffb02e; --danger:#ff5d6c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0e1320,#080a10);color:var(--tx1);
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;line-height:1.65;padding:36px 20px 60px}
+  .wrap{max-width:980px;margin:0 auto}
+  h1{font-size:26px;margin:0 0 4px;font-weight:800;
+    background:linear-gradient(90deg,var(--accent2),var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--tx3);font-size:13px;margin-bottom:24px}
+  h2{font-size:19px;margin:34px 0 12px;padding-left:11px;border-left:3px solid var(--accent);font-weight:700}
+  h3{font-size:15px;margin:20px 0 8px;color:var(--tx1)}
+  p{margin:8px 0;color:var(--tx2);font-size:14px}
+  .card{background:var(--panel);border:1px solid var(--hair2);border-radius:14px;padding:16px 18px;margin:12px 0}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--hair2);vertical-align:top}
+  th{color:var(--tx3);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  td{color:var(--tx2)}
+  code{background:#0c1018;border:1px solid var(--hair2);border-radius:6px;padding:1px 6px;color:#9fd0ff;font-family:Consolas,monospace;font-size:12.5px}
+  .tag{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;margin-right:6px}
+  .p0{background:#3a1418;color:#ff8a94;border:1px solid #ff5d6c55}
+  .p1{background:#3a2c12;color:#ffce7a;border:1px solid #ffb02e55}
+  .p2{background:#16233a;color:#9fc4ff;border:1px solid #4c8dff55}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--danger)}
+  ul{margin:8px 0;padding-left:20px;color:var(--tx2);font-size:14px}
+  li{margin:5px 0}
+  .kbd{background:#0c1018;border:1px solid var(--hair);border-bottom-width:2px;border-radius:5px;padding:1px 6px;font-family:Consolas,monospace;font-size:12px;color:var(--tx1)}
+  .sev{font-weight:700}
+  .foot{margin-top:30px;color:var(--tx3);font-size:12.5px;border-top:1px solid var(--hair2);padding-top:14px}
+  svg{display:block;margin:6px auto 2px}
+  .legend{font-size:12px;color:var(--tx3);text-align:center;margin-bottom:8px}
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>Cryptunnel 隧道客户端 · 界面分析与优化方案</h1>
+<div class="sub">对象：v1.2.0（玻璃拟态 + 霓虹暗色，自定义无边框窗口） · 分析基于实际 XAML 与 MainWindow.xaml.cs 行为 · 2026-09-02</div>
+
+<div class="card">
+<b>总体评价。</b> v1.2.0 把白底传统风格升级为玻璃拟态 + 霓虹暗色，视觉统一、现代感强；健康概览、流量微条、告警徽章已做到实时绑定；空状态引导、拖拽导入、暗色下拉等细节到位。作为「更猛」方向是合格落地。
+但作为长期使用的运维工具，在 <b>窗口行为正确性、一致性、可发现性、可维护性</b> 上仍有明显可优化点。下面按严重度分级，并给出落地节奏。
+</div>
+
+<h2>一、亮点（建议保留）</h2>
+<ul>
+  <li><span class="ok">✓</span> 设计令牌统一（Tx1–3 / Accent / Success / Warn / Danger / Glass / Hair），暗色玻璃质感一致。</li>
+  <li><span class="ok">✓</span> 顶部 4 张健康概览卡实时绑定 <code>ProjectVm</code>，属性变化即刷新，无需手动刷新。</li>
+  <li><span class="ok">✓</span> 状态点 + 药丸、流量微条（log 刻度）、告警徽章——信息密度高且直观。</li>
+  <li><span class="ok">✓</span> 空配置引导覆盖层 + 拖拽导入 YAML，上手门槛低。</li>
+  <li><span class="ok">✓</span> 自定义无边框窗口 + 标题栏拖拽 / 最小化 / 最大化 / 关闭，霓虹「J」Logo。</li>
+</ul>
+
+<h2>二、问题分析</h2>
+
+<h3>A. 窗口行为（正确性）</h3>
+<table>
+<tr><th style="width:30px">#</th><th>问题</th><th>影响</th></tr>
+<tr>
+  <td>A1</td>
+  <td><b>最大化遮挡任务栏。</b> <code>WindowStyle=None</code> + <code>GlassFrameThickness=0</code> 时，<code>WindowState=Maximized</code> 会铺满整屏、盖住任务栏（WPF 已知坑，代码 <code>BtnMax_Click</code> 仅切换状态、未做 WorkArea 限制）。</td>
+  <td class="bad">高 · 运维常需边看日志边看别的窗口，最大化后找不到任务栏是低级吐槽点。</td>
+</tr>
+<tr>
+  <td>A2</td>
+  <td><b>无最小尺寸约束。</b> 未设 <code>MinWidth/MinHeight</code>，窗口可被拖到极小，8 列表格被压扁、日志区消失、布局崩坏。</td>
+  <td class="warn">中 · 缩窗口即破相。</td>
+</tr>
+</table>
+
+<div class="card" style="text-align:center">
+<div class="legend">A1 示意：无边框最大化铺满显示器（含任务栏区域）</div>
+<svg width="420" height="190" viewBox="0 0 420 190">
+  <rect x="0" y="0" width="420" height="190" fill="#0a0d14"/>
+  <rect x="6" y="6" width="408" height="150" rx="10" fill="#16203a" stroke="#4c8dff" stroke-width="1.5"/>
+  <text x="210" y="86" fill="#a7b3c7" font-size="13" text-anchor="middle" font-family="Segoe UI">最大化窗口（盖住任务栏）</text>
+  <rect x="6" y="160" width="408" height="26" fill="#2a2f3a"/>
+  <text x="210" y="177" fill="#ff8a94" font-size="11" text-anchor="middle" font-family="Segoe UI">← 任务栏被遮，看不到/点不到 →</text>
+</svg>
+</div>
+
+<h3>B. 一致性与导航</h3>
+<table>
+<tr><th>#</th><th>问题</th><th>影响</th></tr>
+<tr><td>B1</td><td><b>左栏「项目(▦)」是死按钮。</b> <code>IsEnabled="False"</code> 却用渐变背景高亮，看起来像可点功能、实际无效，且与右侧项目表格语义重复。</td><td class="warn">中 · 误导点击、显脏。</td></tr>
+<tr><td>B2</td><td><b>图标用 Unicode 字形（▦ ＋ ≣ ⚙ — ▢ ✕）。</b> 不同字体/系统可能显示为豆腐块，尤其 ▢（最大化）、≣。</td><td class="warn">中 · 跨环境不一致。</td></tr>
+<tr><td>B3</td><td><b>「操作」列三按钮窄列拥挤。</b> <code>Width=160</code> + 三个 <code>MinWidth</code> 按钮，窗口变窄时文字截断（<code>HorizontalScrollBarVisibility=Disabled</code> 导致列被压缩而非出横滚）。</td><td class="warn">中 · 窄屏不可读。</td></tr>
+</table>
+
+<h3>C. 信息表达</h3>
+<table>
+<tr><th>#</th><th>问题</th><th>影响</th></tr>
+<tr><td>C1</td><td><b>概览卡标题与副标题语义重复/含糊。</b> 「隧道总数」副标题「配置目录项目数」≈重复；「已连接」副标题「运行中隧道」≈同义；「累计流量」主数字 <code>↓ X ↑ Y</code> 无单位提示。</td><td class="warn">中 · 信息冗余、口径不清。</td></tr>
+<tr><td>C2</td><td><b>告警列两徽章点击都打开同一明细窗且不过滤级别。</b> 点「警告」徽章也会看到错误，区分度弱（<code>BtnShowErrors/BtnShowWarnings</code> 都 <code>new ErrorDetailWindow(...)</code> 无 level 过滤）。</td><td class="warn">中 · 操作预期不符。</td></tr>
+<tr><td>C3</td><td><b>流量微条 0 字节仍画 3px。</b> <code>BytesToBarWidthConverter</code> 用 <code>Max(3,…)</code>，0 流量看起来「有一点」，不够诚实。</td><td class="warn">低 · 视觉小瑕疵。</td></tr>
+</table>
+
+<h3>D. 可发现性 / 引导</h3>
+<table>
+<tr><th>#</th><th>问题</th><th>影响</th></tr>
+<tr><td>D1</td><td><b>拖拽导入仅空状态有提示。</b> 有项目后用户不知仍可把 YAML 拖到窗口任意处导入（<code>Window_Drop</code> 对全窗口生效）。</td><td class="warn">中 · 能力被埋没。</td></tr>
+<tr><td>D2</td><td><b>主操作无快捷键。</b> 新建 / 重载 / 定位日志均无 <code>KeyBinding</code>。</td><td class="warn">低 · 效率损失。</td></tr>
+</table>
+
+<h3>E. 可访问性</h3>
+<table>
+<tr><th>#</th><th>问题</th><th>影响</th></tr>
+<tr><td>E1</td><td><b>次要文字对比度偏低。</b> <code>Tx3(#6c7890)</code> 用于列头(11px)、副标题等小字，暗底对比度约 4:1，接近 WCAG AA 下限 4.5:1，小字号吃力。</td><td class="warn">低 · 暗环境可读性问题。</td></tr>
+<tr><td>E2</td><td><b>无浅色 / 高对比主题。</b> 部分用户在亮环境看暗色吃力。</td><td class="warn">低 · 可选。</td></tr>
+</table>
+
+<h3>F. 可维护性（为后续迭代铺路）</h3>
+<table>
+<tr><th>#</th><th>问题</th><th>影响</th></tr>
+<tr><td>F1</td><td><b>样式全内联在 <code>MainWindow.Resources</code>（~320 行），且 <code>ErrorDetailWindow.xaml</code> 又复制一套设计令牌。</b> 改一处要改两处，易漂移。</td><td class="warn">中 · 回归风险。</td></tr>
+<tr><td>F2</td><td><b>无边框外壳逻辑只写在 <code>MainWindow</code>。</b> <code>ErrorDetailWindow</code> / <code>ProjectEditorWindow</code> 也 <code>WindowStyle=None</code> 但没 <code>WindowChrome</code>，最大化行为不一致。</td><td class="warn">中 · 行为分裂。</td></tr>
+</table>
+
+<h2>三、优化方案（按优先级）</h2>
+
+<div class="card">
+<span class="tag p0">P0</span><b>必做 · 影响日常可用性（改动小、收益大）</b>
+<ul>
+  <li><b>A1 最大化不挡任务栏：</b> 在 <code>MainWindow</code> 挂 <code>HwndSource</code> 钩子处理 <code>WM_GETMINMAXINFO</code>，最大化时把窗口矩形限制在 <code>SystemParameters.WorkArea</code>；最大化态圆角设为 0。建议抽成通用 <code>WindowChromeBehavior</code> 复用给其它窗口（顺带解决 F2）。</li>
+  <li><b>A2 最小尺寸：</b> 设 <code>MinWidth="980" MinHeight="640"</code>，保证 8 列表格至少可读、日志区不消失。</li>
+</ul>
+</div>
+
+<div class="card">
+<span class="tag p1">P1</span><b>强烈建议 · 体验与一致性（多数纯 XAML / 小逻辑，可一轮迭代做完）</b>
+<ul>
+  <li><b>B1 左栏死按钮：</b> 改为顶部品牌区（不可点的「J」+ 应用名），或移除，把栅格留给 3 个真实功能（新建 / 日志 / 配置）。</li>
+  <li><b>B2 图标矢量化的：</b> 用 <code>Path</code>（Segoe MDL2 / 自制几何）替换 Unicode 字形，保证跨环境一致。</li>
+  <li><b>C1 概览卡口径：</b> 副标题改为信息量更高的说明，如「运行中 / 总数」「错误隧道数」「自启动以来累计」；流量主数字补单位（B/KB/MB）。</li>
+  <li><b>C2 告警明细过滤：</b> <code>ErrorDetailWindow</code> 支持按 <code>level</code> 过滤（错误徽章→只看错误，警告徽章→只看警告），或加级别 Tab。</li>
+  <li><b>C3 流量微条 0 值：</b> <code>b==0</code> 时返回 0（不画条），或画一条极淡基线。</li>
+  <li><b>D1 拖拽导入常驻提示：</b> 工具栏/表格区加淡提示「可拖入 YAML 导入」，或拖动悬停时高亮拖拽热区。</li>
+  <li><b>D2 快捷键：</b> 加 <span class="kbd">Ctrl+N</span> 新建、<span class="kbd">Ctrl+R</span> 重载、<span class="kbd">Ctrl+L</span> 定位日志（<code>InputBindings</code>）。</li>
+</ul>
+</div>
+
+<div class="card">
+<span class="tag p2">P2</span><b>打磨 / 长期</b>
+<ul>
+  <li><b>E1 对比度：</b> <code>Tx3</code> 提亮到 <code>#8a96ad</code> 左右，或列头/副标题改用 <code>Tx2</code>。</li>
+  <li><b>F1 抽主题资源字典：</b> 建 <code>Theme.xaml</code> / <code>Controls.xaml</code>（设计令牌 + 按钮/ComboBox/DataGrid/Toggle 样式），多窗口 <code>MergedDictionaries</code> 共用。</li>
+  <li><b>F2 通用 WindowChromeBehavior：</b> 统一三个窗口无边框行为（含最大化不挡任务栏）。</li>
+  <li><b>E2 可选浅色 / 高对比主题。</b></li>
+</ul>
+</div>
+
+<h2>四、建议落地节奏</h2>
+<p>
+<b>第 1 步（P0）：</b> 先修 A1 + A2——改动最小、收益最大，直接消除「最大化找不到任务栏 / 拖小破相」两类低级吐槽。<br/>
+<b>第 2 步（P1）：</b> 一致性 + 可发现性一轮迭代做完（B1/B2/C1–C3/D1/D2 基本是 XAML 与小逻辑）。<br/>
+<b>第 3 步（P2）：</b> 抽资源字典 / 通用 Behavior 结合下次大改一起做，避免现在动一大片引发回归。
+</p>
+
+<div class="foot">
+说明：本分析基于 v1.2.0 已落地的 <code>MainWindow.xaml</code> / <code>ErrorDetailWindow.xaml</code> / <code>MainWindow.xaml.cs</code> 实际代码与行为，未做主观臆测。A1 最大化行为已对照 <code>BtnMax_Click</code> 实现确认无 WorkArea 限制；C3 已对照 <code>BytesToBarWidthConverter</code> 的 <code>Max(3,…)</code> 确认。其余为可观测的布局/交互事实。
+</div>
+
+</div></body>
+</html>

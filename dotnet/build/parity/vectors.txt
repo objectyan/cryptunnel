@@ -1,0 +1,18 @@
+# Java AesUtil 生成的基准向量（用于校验 C# 版字节级对齐）
+# 生成方式见同目录 ParityCheck.java 顶部注释
+# 生成环境：Temurin 25.0.4 编译运行原始 src/main/java/io/github/objectyan/proxy/AesUtil.java
+
+RAW_KEY=SxRise2026EncryptSecret
+
+# 1) 密钥派生（确定性，最强校验项）
+AES_KEY=6db1c6320e180188073db9447238b3dfbb0054ad94a6938ea0142c708af81110
+HMAC_KEY=c41c6af84ec16c7d0c347108483ab8473b3b1e89dc6e9507589575d7f4265ff0
+
+# 2) 明文与其 Base64
+PLAIN=AUTH:TestAuthKey:1700000000:0123456789abcdef0123456789abcdef
+PLAIN_B64=QVVUSDpUZXN0QXV0aEtleToxNzAwMDAwMDAwOjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVm
+
+# 3) Java 加密产物（含随机 IV，仅用于验证「Java 加密 -> C# 能解密」）
+JAVA_CIPHER=4IVzXM0ubz8jo5bGgufPZ2r6XX7VViy+5dcI8HaLV3T1FDEAC6p8Y7Iz2KuokU7xS4WkaNN5g81915ztckHdu/IzCLbCyQOumVLYlJZrgNaOUc3HNW60axW0BeIjVJFe//VuSPIT7WLeJMnoCqoyBg==
+
+# 4) 篡改必须被检测（Java 侧实测 TAMPER=DETECTED）

@@ -1,0 +1,11 @@
+﻿<Application x:Class="Cryptunnel.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Cryptunnel.App"
+             xmlns:conv="clr-namespace:Cryptunnel.App.Converters">
+    <Application.Resources>
+        <conv:BytesConverter x:Key="Bytes"/>
+        <conv:StateColorConverter x:Key="StateColor"/>
+        <conv:EmptyToVisibilityConverter x:Key="EmptyToVis"/>
+    </Application.Resources>
+</Application>

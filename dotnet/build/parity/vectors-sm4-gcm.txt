@@ -1,0 +1,35 @@
+# SM4 / AES-GCM 跨语言对齐基准向量
+#
+# 生成方式：用 Java 侧实现（core 的 TunnelCipher，SM4 走 BouncyCastle）导出，
+# 供 .NET 侧自实现的 Sm4Engine / AesGcmCipher 做字节级校验。
+# 生成脚本见 dotnet/build/parity/Sm4Vectors.java。
+#
+# 校验优先级：
+#   1. GBT_A1_BLOCK —— GB/T 32907-2016 附录 A.1 官方向量，不依赖任何实现，最强校验
+#   2. SM4_KEY / HMAC_KEY / AES_KEY —— 密钥派生是确定性的，必须逐字节相等
+#   3. JAVA_*_PAYLOAD —— 含随机 IV，只能验证「Java 加密 -> C# 解密」方向；
+#      反方向须由 C# 加密后交 Java 解，两个方向都过才算对齐
+
+RAW_KEY=SxRise2026EncryptSecret
+PLAIN=AUTH:TestAuthKey:1700000000:0123456789abcdef0123456789abcdef
+
+# --- 密钥派生（确定性，必须完全一致） ---
+# SM4:  SHA-256("SM4:"  + rawKey) 取前 16 字节
+# HMAC: SHA-256("HMAC:" + rawKey) 全部 32 字节（与默认算法共用）
+# AES:  SHA-256("AES:"  + rawKey) 全部 32 字节（GCM 复用）
+SM4_KEY=67a519daca64522f5aa9d985a39d4a66
+HMAC_KEY=c41c6af84ec16c7d0c347108483ab8473b3b1e89dc6e9507589575d7f4265ff0
+AES_KEY=6db1c6320e180188073db9447238b3dfbb0054ad94a6938ea0142c708af81110
+
+# --- GB/T 32907-2016 附录 A.1 官方单分组向量 ---
+# 明文 = 密钥 = 0123456789abcdeffedcba9876543210，SM4 单次加密（ECB 语义、无填充）
+GBT_A1_KEY=0123456789abcdeffedcba9876543210
+GBT_A1_PLAIN=0123456789abcdeffedcba9876543210
+GBT_A1_BLOCK=681edf34d206965e86b3e94f536e4246
+
+# --- 完整载荷（Java 加密，供 C# 解密验证） ---
+# SM4 帧：Base64( IV[16] || HMAC[32] || SM4/CBC/PKCS7 密文 )
+JAVA_SM4_PAYLOAD=M+H/MS2h3WsqNRJssqIn0qui1HT8W1g+hnieVJfEEn1SPHp3zgufu6IP3t3yRGGZw6LIsMSs3MRi1e6wNso6CLGGt0Q9dpJ+/olJqJtP7RjjTsEFv0Q+8fjwsQntOub8W8FmPQs+nV58JspMvnlYHw==
+
+# GCM 帧：Base64( nonce[12] || 密文 || tag[16] )
+JAVA_GCM_PAYLOAD=Q5CJRuYVJVHHKonXP6HgmakYylEvs34yOd4pfex5R2LCLNdp4C8yMqi8YYXBCBjyx11EuSqXOVmQNJ80arpUbCF1BxMwaX/sHy/v0sBEZ6mwqR8idKnyCg==

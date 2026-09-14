@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    跨语言加密对齐自检工程（零 NuGet 依赖，可离线运行）。
+
+    为什么不用 xunit：本仓库 .NET 侧原本没有测试工程，引入 xunit/testhost 会拉入
+    一串 NuGet 包，而这里要验证的是纯密码学字节对齐，用 Java 侧同款的
+    「main + 断言 + 退出码」形式即可，且与 dotnet/build/parity/ParityCheck.java 风格一致。
+
+    运行：见同目录 run.sh
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>CryptoParity</AssemblyName>
+    <RootNamespace>CryptoParity</RootNamespace>
+    <!-- 客户端工程强制 win-x64 自包含，这里是纯算法自检，不需要 -->
+    <SelfContained>false</SelfContained>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 与 Cryptunnel.csproj 保持一致的隐式 using 集合，
+         使被链接的 Crypto/*.cs 无需改动即可编译 -->
+    <Using Include="System.Security.Cryptography" />
+    <Using Include="System.Text" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 直接链接客户端真实源码，避免复制副本导致两份实现漂移。
+         校验必须对着真正在用户机器上跑的实现，否则这套自检就是在验死代码。
+
+         ⚠ 这里是 <Compile Include> 通配符：路径写错时 MSBuild **不报错**，
+         只会匹配到 0 个文件，然后在编译期报「找不到 Sm4Engine 类型」这类
+         看起来毫不相干的错误。改动本文件路径后务必确认实际链接到了文件。 -->
+    <Compile Include="..\..\..\src\Cryptunnel.Core\Crypto\*.cs" LinkBase="Crypto" />
+  </ItemGroup>
+
+</Project>
