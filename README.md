@@ -57,14 +57,14 @@ DBeaver ──► 本地代理 ──► WebSocket 隧道 ──► [ 你的 Web
 <dependency>
     <groupId>io.github.objectyan</groupId>
     <artifactId>cryptunnel-starter-javax</artifactId>
-    <version>1.3.0</version>
+    <version>1.0.0</version>
 </dependency>
 
 <!-- Spring Boot 3.x / 4.x（jakarta.servlet） -->
 <dependency>
     <groupId>io.github.objectyan</groupId>
     <artifactId>cryptunnel-starter-jakarta</artifactId>
-    <version>1.3.0</version>
+    <version>1.0.0</version>
 </dependency>
 ```
 
