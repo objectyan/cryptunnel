@@ -15,6 +15,8 @@ Cryptunnel 隧道运行时层的 **Rust 重写**，与 .NET `Cryptunnel.Core.Tun
 | `addr_policy` | 本地监听地址安全策略（回环判定 + 非回环启动闸门） | 否 |
 | `registry` | `TunnelCipher` 注册表（别名严格对齐 Java：仅 SM4 有 `sm4`） | 否 |
 | `config` | 隧道运行配置（默认值与 .NET 一致） | 否 |
+| `project_config` | 多项目 YAML 原始结构 + 回写（只写非默认字段，health 段原样保留） | 否 |
+| `config_loader` | 配置目录扫描 + defaults 两遍合并 + 逐条校验（对齐 .NET ConfigLoader） | 否 |
 | `tunnel` | 网络核心：监听 → 选路 → 认证 → 双向泵 → 清理 | 是 |
 
 ## 协议对齐点（与服务端 `CryptunnelWebSocketHandler` 一致）
@@ -52,7 +54,7 @@ UI（Tauri 前端）靠 `emit("tunnel-event", ...)` 事件驱动刷新。
 
 ```bash
 cargo build   # 编译
-cargo test    # 28 项单元测试：auth/close_reason/framing/addr_policy/registry/config
+cargo test    # 38 项单元测试：auth/close_reason/framing/addr_policy/registry/config/config_loader/project_config
 ```
 
 依赖：tokio / tokio-tungstenite(rustls) / reqwest(rustls) / futures-util。

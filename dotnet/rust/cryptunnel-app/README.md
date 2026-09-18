@@ -71,13 +71,27 @@ cargo tauri build      # 产出 msi / dmg / AppImage / deb
 
 新增 Tauri command：`start_tunnel` / `stop_tunnel` / `tunnel_status`。
 
-## 自动更新
+## 自动更新（#76 已落地）
 
-后续接入 `tauri-plugin-updater`（替代原 Velopack，后者仅 Windows）。三平台 CI/打包见 `.github/workflows`（待补）。
+接入 `tauri-plugin-updater`（替代原 Velopack，后者仅 Windows）：
+
+- 更新源：GitHub Releases 的 `latest.json`（`release-tauri.yml` 打包时自动生成）。
+- 前端「设置 → 更新」可「检查更新」/「下载并安装」，装完自动重启。
+- 新增 command：`check_update` / `download_and_install_update`（另加 `tauri-plugin-process` 用于重启）。
+- **签名密钥（一次性配置，必做）**：公钥已写入 `tauri.conf.json` 的 `plugins.updater.pubkey`；
+  私钥在本机 `~/.tauri/cryptunnel-updater.key`，**须存到仓库 Secrets** `TAURI_SIGNING_PRIVATE_KEY`
+  （明文贴私钥内容；无密码则 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 留空/不设），否则 CI 无法签更新包。
+
+## 三平台 CI/发布（#78 已落地）
+
+`.github/workflows/release-tauri.yml`：打 `v*` 标签 → `tauri-action` 三 runner 打包并传 Release 资产
+（Windows exe/msi、macOS dmg、Linux AppImage/deb，含 `.sig` 与 `latest.json`）。与 `.NET/WPF` 的
+`release.yml` 相互独立但都监听 `v*`——**两套不要同时发**，建议后续拆分标签前缀（如 `v*` 给 Tauri、
+`net-v*` 给 .NET）。
 
 ## 后续里程碑
 
 1. **#75 Rust 隧道核心**：✅ 已落地（WS/MySQL 会话管理 + HTTP 降级 + AUTH 帧 + 帧守卫 + close 映射，28 单测）。
-2. **#76 平台服务**：托盘/自启/单实例/通知/更新完整化（更新器待接）。
-3. **#77 前端 5 个窗口**：主面板 / 连接配置 / 日志 / 关于 / 设置（当前为单面板 spike，待拆分多项目）。
-4. **#78 三平台 CI/发布**：windows/macos/linux 三 runner + tauri-action 打包。
+2. **#76 平台服务**：✅ 已落地（托盘/自启/单实例/通知 + `tauri-plugin-updater` 自动更新 + 进程重启）。
+3. **#77 前端 5 个窗口 + 多项目配置**：✅ 已落地（配置层 38 单测，5 视图，多隧道并行）。
+4. **#78 三平台 CI/发布**：✅ 已落地（windows/macos/linux 三 runner + tauri-action 打包 + latest.json）。

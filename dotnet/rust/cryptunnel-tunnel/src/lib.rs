@@ -16,11 +16,15 @@ pub mod addr_policy;
 pub mod auth;
 pub mod close_reason;
 pub mod config;
+pub mod config_loader;
 pub mod error;
 pub mod framing;
+pub mod project_config;
 pub mod registry;
 pub mod tunnel;
 
 pub use config::{HttpEndpoint, TransportMode, TunnelConfig, DEFAULT_CIPHER};
+pub use config_loader::{load as load_config_dir, try_read_file, ConfigError, LoadResult};
 pub use error::{TunnelError, TunnelFrameTooLarge};
+pub use project_config::{build_project_yaml, ProjectFile};
 pub use tunnel::{Direction, EventSink, LogLevel, Tunnel, TunnelEvent, TunnelState};

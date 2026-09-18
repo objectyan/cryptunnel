@@ -7,7 +7,12 @@ use tauri_plugin_autostart::MacosLauncher;
 
 mod tunnel_state;
 
+use serde::Serialize;
+use std::sync::Arc;
 use tunnel_state::{StartParams, TunnelManager};
+
+/// Tauri 管理的共享隧道管理器状态。
+type SharedMgr = Arc<TunnelManager>;
 
 /// 显示并聚焦主窗口
 fn show_main_window(app: &tauri::AppHandle) {
@@ -73,8 +78,11 @@ pub fn run() {
         ))
         // 系统通知
         .plugin(tauri_plugin_notification::init())
-        // 隧道全局状态
-        .manage(TunnelManager::new())
+        // 自动更新（替代 Velopack，跨平台）+ 进程重启
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        // 隧道全局状态（Arc 共享，便于后台任务自持引用）
+        .manage(std::sync::Arc::new(TunnelManager::new()))
         .setup(|app| {
             build_tray(app)?;
             Ok(())
@@ -93,6 +101,20 @@ pub fn run() {
             crypto_self_check,
             set_autostart,
             get_autostart,
+            check_update,
+            download_and_install_update,
+            // 多隧道
+            list_projects,
+            start_project,
+            stop_project,
+            stop_all_projects,
+            project_status,
+            // 项目管理
+            get_config_dir,
+            read_project,
+            save_project,
+            delete_project,
+            // spike 手动模式（兼容保留）
             start_tunnel,
             stop_tunnel,
             tunnel_status,
@@ -140,30 +162,235 @@ fn get_autostart(app: tauri::AppHandle) -> Result<bool, String> {
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
 
+// ============================================================================
+// 自动更新（tauri-plugin-updater，GitHub Releases 作为更新源）
+// ============================================================================
+
+/// 更新检查结果（不含包体，仅元信息）。
+#[derive(Debug, Clone, Serialize)]
+struct UpdateInfo {
+    available: bool,
+    current: String,
+    latest: String,
+    notes: Option<String>,
+}
+
+/// 检查是否有新版本（不下载）。
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let current = app.package_info().version.to_string();
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(UpdateInfo {
+            available: true,
+            current,
+            latest: update.version.clone(),
+            notes: update.body.clone(),
+        }),
+        Ok(None) => Ok(UpdateInfo {
+            available: false,
+            current: current.clone(),
+            latest: current,
+            notes: None,
+        }),
+        Err(e) => Err(format!("检查更新失败：{e}")),
+    }
+}
+
+/// 下载并安装更新，完成后重启应用。
+#[tauri::command]
+async fn download_and_install_update(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Ok("已是最新版本。".into());
+    };
+    update
+        .download_and_install(|_chunk, _total| {}, || {})
+        .await
+        .map_err(|e| format!("下载/安装失败：{e}"))?;
+    // 重启到新版本（app.restart() 不返回）。
+    app.restart();
+}
+
+// ============================================================================
+// 多隧道：项目列表 / 启停 / 状态
+// ============================================================================
+
+/// 前端展示用的项目摘要（不含密钥）。
+#[derive(Debug, Clone, Serialize)]
+struct ProjectSummary {
+    name: String,
+    display_name: String,
+    enabled: bool,
+    server_url: String,
+    local_port: u16,
+    cipher: String,
+    running: bool,
+}
+
+/// 配置错误条目（带文件名）。
+#[derive(Debug, Clone, Serialize)]
+struct ConfigErrorItem {
+    file: String,
+    message: String,
+}
+
+/// 项目列表 + 配置错误。
+#[derive(Debug, Clone, Serialize)]
+struct ProjectList {
+    projects: Vec<ProjectSummary>,
+    errors: Vec<ConfigErrorItem>,
+    config_dir: String,
+}
+
+/// 加载配置目录，返回项目列表（含运行状态）与错误。
+#[tauri::command]
+fn list_projects(app: tauri::AppHandle, mgr: tauri::State<'_, TunnelManager>) -> ProjectList {
+    let config_dir = tunnel_state::resolve_config_dir(&app);
+    let result = cryptunnel_tunnel::load_config_dir(&config_dir);
+    mgr.set_configs(result.configs.clone());
+    let projects = result
+        .configs
+        .iter()
+        .map(|c| ProjectSummary {
+            name: c.name.clone(),
+            display_name: c.display_name.clone(),
+            enabled: c.enabled,
+            server_url: c.server_url.clone(),
+            local_port: c.local_port,
+            cipher: c.cipher.clone(),
+            running: mgr.is_running(&c.name),
+        })
+        .collect();
+    ProjectList {
+        projects,
+        errors: result
+            .errors
+            .iter()
+            .map(|e| ConfigErrorItem {
+                file: e.file.clone(),
+                message: e.message.clone(),
+            })
+            .collect(),
+        config_dir: config_dir.display().to_string(),
+    }
+}
+
+/// 按项目名启动隧道（配置来自最近一次 list_projects 加载）。
+#[tauri::command]
+fn start_project(
+    app: tauri::AppHandle,
+    mgr: tauri::State<'_, TunnelManager>,
+    name: String,
+) -> Result<String, String> {
+    let cfg = mgr
+        .get_config(&name)
+        .ok_or_else(|| format!("找不到项目「{name}」，请先刷新列表。"))?;
+    tunnel_state::start_with_config(&app, &mgr, cfg)
+}
+
+/// 按项目名停止隧道。
+#[tauri::command]
+fn stop_project(mgr: tauri::State<'_, TunnelManager>, name: String) -> Result<String, String> {
+    if mgr.stop(&name) {
+        Ok(format!("隧道「{name}」已发送停止指令。"))
+    } else {
+        Err(format!("隧道「{name}」未在运行。"))
+    }
+}
+
+/// 停止所有运行中的隧道。
+#[tauri::command]
+fn stop_all_projects(mgr: tauri::State<'_, SharedMgr>) -> String {
+    mgr.stop_all();
+    "已停止所有运行中的隧道。".into()
+}
+
+/// 查询某项目运行状态。
+#[tauri::command]
+fn project_status(mgr: tauri::State<'_, TunnelManager>, name: String) -> String {
+    if mgr.is_running(&name) {
+        "running".into()
+    } else {
+        "stopped".into()
+    }
+}
+
+// ============================================================================
+// 项目管理：读 / 写 / 删
+// ============================================================================
+
+/// 返回配置目录路径（供设置窗展示）。
+#[tauri::command]
+fn get_config_dir(app: tauri::AppHandle) -> String {
+    tunnel_state::resolve_config_dir(&app).display().to_string()
+}
+
+/// 读取单个项目原始文件（编辑器回填）。
+#[tauri::command]
+fn read_project(app: tauri::AppHandle, name: String) -> Result<serde_json::Value, String> {
+    let dir = tunnel_state::resolve_config_dir(&app);
+    let path = tunnel_state::project_file_path(&dir, &name);
+    let pf = cryptunnel_tunnel::try_read_file(&path)?;
+    serde_json::to_value(pf).map_err(|e| e.to_string())
+}
+
+/// 保存项目配置（新建或覆盖）。
+#[tauri::command]
+fn save_project(app: tauri::AppHandle, pf: serde_json::Value) -> Result<String, String> {
+    let project: cryptunnel_tunnel::ProjectFile =
+        serde_json::from_value(pf).map_err(|e| format!("参数解析失败：{e}"))?;
+    let dir = tunnel_state::resolve_config_dir(&app);
+    let path = tunnel_state::save_project_file(&dir, &project)?;
+    Ok(format!("已保存：{}", path.display()))
+}
+
+/// 删除项目配置（先停隧道，再删文件）。
+#[tauri::command]
+fn delete_project(
+    app: tauri::AppHandle,
+    mgr: tauri::State<'_, SharedMgr>,
+    name: String,
+) -> Result<String, String> {
+    mgr.stop(&name);
+    let dir = tunnel_state::resolve_config_dir(&app);
+    let path = tunnel_state::project_file_path(&dir, &name);
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| format!("删除失败：{e}"))?;
+    }
+    Ok(format!("已删除项目「{name}」。"))
+}
+
+// ============================================================================
+// spike 手动模式（兼容保留，后续会被项目模式取代）
+// ============================================================================
+
 /// 启动隧道（本地端口 → 服务端加密隧道）。
 #[tauri::command]
 fn start_tunnel(
     app: tauri::AppHandle,
-    mgr: tauri::State<'_, TunnelManager>,
+    mgr: tauri::State<'_, SharedMgr>,
     params: StartParams,
 ) -> Result<String, String> {
-    tunnel_state::start(&app, &mgr, params)
+    tunnel_state::start(&app, mgr.inner(), params)
 }
 
-/// 停止隧道。
+/// 停止隧道（spike 默认隧道）。
 #[tauri::command]
-fn stop_tunnel(mgr: tauri::State<'_, TunnelManager>) -> Result<String, String> {
-    if !mgr.is_running() {
+fn stop_tunnel(mgr: tauri::State<'_, SharedMgr>) -> Result<String, String> {
+    if !mgr.is_running("default") {
         return Err("隧道未在运行。".to_string());
     }
-    mgr.stop();
+    mgr.stop("default");
     Ok("已发送停止指令。".to_string())
 }
 
-/// 查询隧道运行状态。
+/// 查询隧道运行状态（spike 默认隧道）。
 #[tauri::command]
-fn tunnel_status(mgr: tauri::State<'_, TunnelManager>) -> Result<String, String> {
-    Ok(if mgr.is_running() {
+fn tunnel_status(mgr: tauri::State<'_, SharedMgr>) -> Result<String, String> {
+    Ok(if mgr.is_running("default") {
         "running".to_string()
     } else {
         "stopped".to_string()

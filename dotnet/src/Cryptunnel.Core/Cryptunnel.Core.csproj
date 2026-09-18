@@ -1,13 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <!--
+    ⚠ 本工程已退役为「跨语言字节对齐参照」，仅保留 Crypto/ 真实加密源码。
+    客户端唯一实现已迁往 Rust + Tauri（dotnet/rust/）。本目录不再产出可发布的应用，
+    它存在的唯一理由是 dotnet/build/parity 的跨语言字节对齐自检直接链接这里的
+    Crypto/*.cs —— 校验必须对着真实实现，验的不是副本。请勿在此新增业务代码。
+  -->
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="YamlDotNet" Version="18.1.0" />
-  </ItemGroup>
 
 </Project>

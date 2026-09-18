@@ -101,7 +101,12 @@ cryptunnel:
 
 ### 3. 客户端
 
-使用桌面客户端（`dotnet/` 目录下的 Windows 托盘应用）或老 Java 客户端，在本地起一个监听端口，DBeaver 连它即可。客户端配置里的 `aesKey` / `authKey` 需与服务端对应 target 一致。
+使用 **Rust + Tauri 桌面客户端**（`dotnet/rust/cryptunnel-app`，多平台：Windows / macOS / Linux），
+在本地起一个监听端口，DBeaver 连 `localhost:{端口}` 即可。客户端配置里的 `aesKey` / `authKey`
+需与服务端对应 target 一致。
+
+> 客户端唯一实现为 Rust + Tauri。原 Windows WPF 客户端（`Cryptunnel.App`）已退役；
+> `dotnet/src/Cryptunnel.Core/Crypto/` 仅作为跨语言字节对齐参照保留（供 `dotnet/build/parity` 校验）。
 
 ---
 

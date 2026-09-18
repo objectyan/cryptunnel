@@ -1,0 +1,92 @@
+# Rust + Tauri 客户端（多平台）发布流水线：打 v* 标签时用 tauri-action 三平台打包并传到 GitHub Releases。
+#
+# 用法（版本号以 tauri.conf.json / Cargo.toml 为准，标签须与之对应）：
+#   git tag v0.2.0
+#   git push origin v0.2.0
+#
+# 产物（按平台，传到 Release 资产）：
+#   Windows:  Cryptunnel_<ver>_x64-setup.exe / .msi  (+ .sig 更新签名)
+#   macOS:    Cryptunnel_<ver>_universal.dmg / .app.tar.gz (+ .sig)
+#   Linux:    Cryptunnel_<ver>_amd64.AppImage / .deb (+ .sig)
+#   latest.json                                   更新清单（tauri-plugin-updater 据此找最新版）
+#
+# 更新签名（必配，否则 createUpdaterArtifacts 失败）：
+#   1. 本地执行一次 `cargo tauri signer generate -w ~/.tauri/cryptunnel.key` 得到一对密钥
+#   2. 公钥填进 src-tauri/tauri.conf.json 的 plugins.updater.pubkey
+#   3. 私钥存到仓库 Secrets：TAURI_SIGNING_PRIVATE_KEY（及可选 TAURI_SIGNING_PRIVATE_KEY_PASSWORD）
+#
+# 注意：本 workflow 与 release.yml（.NET/WPF 客户端）相互独立，但都监听 v* 标签。
+#       打标签前请确认要发的是哪一套，避免两套同时发（或后续拆分标签前缀）。
+
+name: Release Tauri
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # 上传 Release 资产所需
+
+jobs:
+  release-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+          - platform: macos-latest
+            target: universal-apple-darwin
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version from tag
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "Releasing version $v"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+
+      # Linux 打包需要 webkit2gtk 等系统依赖（tauri 官方前置要求）
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: dotnet/rust/cryptunnel-crypto
+          cache-on-failure: true
+
+      # tauri-action 自带前端构建 + cargo build + 平台打包 + 上传 Release 资产 + 生成 latest.json。
+      # 我们的前端是纯静态（无构建步骤），故不设 beforeBuildCommand。
+      - name: Build & upload Tauri bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: dotnet/rust/cryptunnel-app
+          tagName: ${{ github.ref_name }}
+          releaseName: Cryptunnel v${{ env.VERSION }}
+          releaseDraft: true
+          prerelease: false

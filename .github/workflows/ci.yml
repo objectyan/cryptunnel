@@ -48,17 +48,20 @@ jobs:
         working-directory: java
         run: mvn -B -Pjakarta clean install
 
-  dotnet:
-    runs-on: windows-latest
+  # 客户端唯一实现 = Rust + Tauri（.NET/WPF 已退役）。跑测试保证隧道/加密/配置层不坏。
+  rust-client:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
         with:
-          dotnet-version: '10.0.x'
-      - name: Restore
-        working-directory: dotnet/src
-        run: dotnet restore Cryptunnel.App/Cryptunnel.App.csproj
-      - name: Build
-        working-directory: dotnet/src
-        run: dotnet build Cryptunnel.App/Cryptunnel.App.csproj -c Release --no-restore
+          workspaces: dotnet/rust/cryptunnel-crypto
+      - name: cargo test (workspace: crypto + tunnel)
+        working-directory: dotnet/rust/cryptunnel-crypto
+        run: cargo test --workspace --exclude cryptunnel-app
+      - name: cargo check (tauri app)
+        working-directory: dotnet/rust/cryptunnel-app/src-tauri
+        run: cargo check

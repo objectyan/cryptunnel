@@ -1,13 +1,14 @@
 <Solution>
-  <!-- 现役客户端（net10.0-windows / net10.0） -->
-  <Project Path="src/Cryptunnel.App/Cryptunnel.App.csproj" />
-  <Project Path="src/Cryptunnel.Core/Cryptunnel.Core.csproj" />
+  <!--
+    ⚠ .NET 客户端已退役（迁往 Rust + Tauri，见 dotnet/rust/）。
+    本 solution 只保留「跨语言字节对齐参照」所需的两个工程：
+    - Cryptunnel.Core：仅含 Crypto/ 真实加密源码，被 parity 直接链接校验。
+    - CryptoParity：跨语言（Java ↔ .NET ↔ Rust）加密字节对齐自检。
+    请勿把这里当成现役客户端树；新的 UI / 隧道 / 配置代码一律进 dotnet/rust/。
+  -->
 
-  <!-- 验证工程：都是 main + 断言 + 退出码，不是 xunit。
-       纳入 solution 是为了「改了 Core 忘了跑校验」时 IDE 至少会一起编译。 -->
-  <Project Path="build/verify/FramingVerify/FramingVerify.csproj" />
-  <Project Path="build/verify/TunnelVerify/TunnelVerify.csproj" />
-  <Project Path="build/verify/UiVerify/UiVerify.csproj" />
+  <!-- 字节对齐参照（仅 Crypto/） -->
+  <Project Path="src/Cryptunnel.Core/Cryptunnel.Core.csproj" />
 
   <!-- 跨语言一致性校验（对 Java core 反解密文） -->
   <Project Path="build/parity/CryptoParity/CryptoParity.csproj" />
