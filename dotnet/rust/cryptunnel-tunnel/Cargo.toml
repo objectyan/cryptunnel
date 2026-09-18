@@ -1,0 +1,16 @@
+[package]
+name = "cryptunnel-tunnel"
+version = "0.1.0"
+edition = "2021"
+description = "Cryptunnel 隧道核心（Rust 重写）：本地 TCP 监听 → 加密 WebSocket/HTTP 隧道 → 服务端，与 .NET/Java 逐点对齐"
+license = "Apache-2.0"
+
+[dependencies]
+cryptunnel-crypto = { path = "../cryptunnel-crypto" }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
+tungstenite = "0.30"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "rustls-tls"] }
+futures-util = "0.3"
+rand = "0.8"
+tracing = "0.1"

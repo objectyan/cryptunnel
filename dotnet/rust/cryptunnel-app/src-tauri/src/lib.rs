@@ -5,6 +5,10 @@ use tauri::{
 };
 use tauri_plugin_autostart::MacosLauncher;
 
+mod tunnel_state;
+
+use tunnel_state::{StartParams, TunnelManager};
+
 /// 显示并聚焦主窗口
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
@@ -69,6 +73,8 @@ pub fn run() {
         ))
         // 系统通知
         .plugin(tauri_plugin_notification::init())
+        // 隧道全局状态
+        .manage(TunnelManager::new())
         .setup(|app| {
             build_tray(app)?;
             Ok(())
@@ -87,6 +93,9 @@ pub fn run() {
             crypto_self_check,
             set_autostart,
             get_autostart,
+            start_tunnel,
+            stop_tunnel,
+            tunnel_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running cryptunnel application");
@@ -129,4 +138,34 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<String, String>
 fn get_autostart(app: tauri::AppHandle) -> Result<bool, String> {
     use tauri_plugin_autostart::ManagerExt;
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+/// 启动隧道（本地端口 → 服务端加密隧道）。
+#[tauri::command]
+fn start_tunnel(
+    app: tauri::AppHandle,
+    mgr: tauri::State<'_, TunnelManager>,
+    params: StartParams,
+) -> Result<String, String> {
+    tunnel_state::start(&app, &mgr, params)
+}
+
+/// 停止隧道。
+#[tauri::command]
+fn stop_tunnel(mgr: tauri::State<'_, TunnelManager>) -> Result<String, String> {
+    if !mgr.is_running() {
+        return Err("隧道未在运行。".to_string());
+    }
+    mgr.stop();
+    Ok("已发送停止指令。".to_string())
+}
+
+/// 查询隧道运行状态。
+#[tauri::command]
+fn tunnel_status(mgr: tauri::State<'_, TunnelManager>) -> Result<String, String> {
+    Ok(if mgr.is_running() {
+        "running".to_string()
+    } else {
+        "stopped".to_string()
+    })
 }

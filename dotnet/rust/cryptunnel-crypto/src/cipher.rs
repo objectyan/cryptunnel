@@ -51,7 +51,11 @@ impl std::fmt::Display for CryptoError {
 impl std::error::Error for CryptoError {}
 
 /// 隧道加密算法统一接口（对应 .NET ITunnelCipher）。
-pub trait TunnelCipher {
+///
+/// `Send + Sync`：所有实现都是无状态单元结构体（密钥按需从 raw_key 派生、IV/nonce
+/// 每次随机生成），可安全跨线程共享——隧道层在 `tokio::spawn` 的连接任务间以
+/// `Arc<dyn TunnelCipher>` 传递它。
+pub trait TunnelCipher: Send + Sync {
     fn id(&self) -> &'static str;
     /// 明文 -> Base64 帧。
     fn seal(&self, plaintext: &[u8], raw_key: &str) -> String;

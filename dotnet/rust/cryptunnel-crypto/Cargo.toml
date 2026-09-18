@@ -6,7 +6,7 @@ description = "Cryptunnel 隧道加密核心（Rust 重写）：AES-CBC-HMAC / A
 license = "Apache-2.0"
 
 [workspace]
-members = [".", "../cryptunnel-app/src-tauri"]
+members = [".", "../cryptunnel-tunnel", "../cryptunnel-app/src-tauri"]
 
 [dependencies]
 aes = "0.8"

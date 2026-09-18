@@ -61,6 +61,15 @@ cargo tauri build      # 产出 msi / dmg / AppImage / deb
 | 系统通知 | `tauri-plugin-notification`（已接插件） | ✅ 接线 |
 | 前端 ↔ Rust 命令桥 | `invoke("greet" / "crypto_self_check" / "set_autostart" ...)` | ✅ |
 | 加密层依赖接通 | `crypto_self_check` 调用 KDF | ✅ |
+| **隧道核心接通** | `cryptunnel-tunnel`：启动/停止隧道、WS/HTTP 双通道、事件桥接前端 | ✅ |
+
+## 隧道（#75 已落地）
+
+后端集成 [`cryptunnel-tunnel`](../cryptunnel-tunnel)（Rust 隧道核心，与 .NET/Java 逐点对齐）。
+前端填「服务端地址 + aesKey + authKey + 本地端口」即可启动隧道，运行日志实时推送到面板
+（`emit("tunnel-event")`）。DBeaver 连 `localhost:{本地端口}` 即可经加密隧道访问内网 MySQL。
+
+新增 Tauri command：`start_tunnel` / `stop_tunnel` / `tunnel_status`。
 
 ## 自动更新
 
@@ -68,7 +77,7 @@ cargo tauri build      # 产出 msi / dmg / AppImage / deb
 
 ## 后续里程碑
 
-1. **#75 Rust 隧道核心**：WebSocket 客户端 + MySQL 握手/包编解码 + 「一个 WS = 一条 MySQL 连接」会话管理 + HTTP 降级 + AUTH 帧，对接 `cryptunnel-crypto`，对标 TunnelVerify 39 项。
-2. **#76 平台服务**：托盘/自启/单实例/通知/更新完整化。
-3. **#77 前端 5 个窗口**：主面板 / 连接配置 / 日志 / 关于 / 设置。
+1. **#75 Rust 隧道核心**：✅ 已落地（WS/MySQL 会话管理 + HTTP 降级 + AUTH 帧 + 帧守卫 + close 映射，28 单测）。
+2. **#76 平台服务**：托盘/自启/单实例/通知/更新完整化（更新器待接）。
+3. **#77 前端 5 个窗口**：主面板 / 连接配置 / 日志 / 关于 / 设置（当前为单面板 spike，待拆分多项目）。
 4. **#78 三平台 CI/发布**：windows/macos/linux 三 runner + tauri-action 打包。

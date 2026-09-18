@@ -12,29 +12,63 @@
       <img src="icon.png" alt="logo" class="logo" />
       <div>
         <h1>Cryptunnel</h1>
-        <p class="sub">Rust + Tauri 多平台隧道客户端 · 骨架 spike</p>
+        <p class="sub">Rust + Tauri 多平台隧道客户端</p>
       </div>
-      <span id="conn-badge" class="badge badge-idle">未连接</span>
+      <span id="tunnel-badge" class="badge badge-idle">已停止</span>
     </header>
 
+    <!-- 隧道配置 -->
     <section class="card">
-      <h2>前后端连通性自检</h2>
-      <p class="hint">验证前端 webview 能调到 Rust 后端命令，以及加密层依赖已接通。</p>
-      <div class="row">
-        <button id="btn-greet">调用 greet</button>
-        <button id="btn-crypto">加密层自检</button>
-        <button id="btn-hide">隐藏到托盘</button>
+      <h2>隧道连接</h2>
+      <div class="grid">
+        <label>服务端地址
+          <input id="f-server" type="text" placeholder="http://host:8080" value="http://localhost:8080" />
+        </label>
+        <label>本地端口
+          <input id="f-port" type="number" value="3307" />
+        </label>
+        <label>加密密钥 (aesKey)
+          <input id="f-aes" type="password" placeholder="aesKey" />
+        </label>
+        <label>认证密钥 (authKey)
+          <input id="f-auth" type="password" placeholder="authKey" />
+        </label>
+        <label>加密算法
+          <select id="f-cipher">
+            <option value="aes-256-cbc-hmac-sha256" selected>aes-256-cbc-hmac-sha256</option>
+            <option value="aes-256-gcm">aes-256-gcm</option>
+            <option value="sm4-cbc-hmac-sha256">sm4-cbc-hmac-sha256</option>
+          </select>
+        </label>
+        <label>目标 target（可空）
+          <input id="f-target" type="text" placeholder="缺省 target" />
+        </label>
       </div>
-      <pre id="output" class="output">点击按钮开始…</pre>
+      <div class="row">
+        <button id="btn-start" class="primary">启动隧道</button>
+        <button id="btn-stop" disabled>停止隧道</button>
+      </div>
+      <p class="hint">DBeaver 连接 <code>localhost:<span id="echo-port">3307</span></code>，账密填 MySQL 真实账号。</p>
     </section>
 
+    <!-- 实时日志 -->
     <section class="card">
-      <h2>开机自启</h2>
+      <h2>运行日志</h2>
+      <div id="log" class="log"></div>
+    </section>
+
+    <!-- 系统 -->
+    <section class="card">
+      <h2>系统</h2>
       <label class="switch-row">
         <input type="checkbox" id="autostart" />
         <span>登录系统后自动启动 Cryptunnel</span>
       </label>
-      <p id="autostart-state" class="hint"></p>
+      <div class="row" style="margin-top:12px">
+        <button id="btn-hide">隐藏到托盘</button>
+        <button id="btn-crypto">加密层自检</button>
+      </div>
+      <pre id="output" class="output" style="display:none"></pre>
     </section>
 
     <footer class="foot">
