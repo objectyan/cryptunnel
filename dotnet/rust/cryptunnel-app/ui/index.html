@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cryptunnel 隧道客户端</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="head">
+      <img src="icon.png" alt="logo" class="logo" />
+      <div>
+        <h1>Cryptunnel</h1>
+        <p class="sub">Rust + Tauri 多平台隧道客户端 · 骨架 spike</p>
+      </div>
+      <span id="conn-badge" class="badge badge-idle">未连接</span>
+    </header>
+
+    <section class="card">
+      <h2>前后端连通性自检</h2>
+      <p class="hint">验证前端 webview 能调到 Rust 后端命令，以及加密层依赖已接通。</p>
+      <div class="row">
+        <button id="btn-greet">调用 greet</button>
+        <button id="btn-crypto">加密层自检</button>
+        <button id="btn-hide">隐藏到托盘</button>
+      </div>
+      <pre id="output" class="output">点击按钮开始…</pre>
+    </section>
+
+    <section class="card">
+      <h2>开机自启</h2>
+      <label class="switch-row">
+        <input type="checkbox" id="autostart" />
+        <span>登录系统后自动启动 Cryptunnel</span>
+      </label>
+      <p id="autostart-state" class="hint"></p>
+    </section>
+
+    <footer class="foot">
+      <span>托盘图标在系统通知区 · 右键出菜单 · 左键唤起本窗口 · 关窗不退出（后台常驻）</span>
+    </footer>
+  </main>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

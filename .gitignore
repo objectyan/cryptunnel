@@ -46,6 +46,8 @@ __pycache__/
 # ---- Rust / Cargo 构建产物 ----
 # dotnet/rust 下的 target/ 已被上面全局 target/ 覆盖，此处仅注释说明；
 # 全局否定规则只放行 java 源码包，不影响 rust 构建产物被忽略。
+# Tauri 代码生成目录（tauri-build 产出，每次构建自动重建）
+dotnet/rust/**/src-tauri/gen/
 
 # ---- 发布产物（761MB，保留在本地磁盘，不进 git）----
 packaging/
