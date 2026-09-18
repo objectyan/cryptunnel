@@ -1,0 +1,105 @@
+# .NET 客户端（WPF）发布流水线：打 v* 标签时自动构建 Velopack 安装包并传到 GitHub Releases。
+#
+# 用法（版本号以 csproj <Version> 为准，标签须与之对应）：
+#   git tag v1.6.0
+#   git push origin v1.6.0
+#
+# 产物（传到 Release 资产）：
+#   Cryptunnel-win-Setup.exe            新用户安装器（免管理员，装到用户目录）
+#   Cryptunnel-<ver>-win-full.nupkg     完整更新包（老客户端自动更新下载）
+#   Cryptunnel-<ver>-win-delta.nupkg    增量更新包（有上一版时生成，更新更省流量）
+#   Cryptunnel-win-Portable.zip         便携版（不安装，解压即用）
+#   releases.win.json / RELEASES        更新清单（UpdateManager 据此找最新版）
+#
+# 框架依赖（framework-dependent）：安装器声明需要 .NET 10 Desktop Runtime，
+# 未装的用户首次安装时会被引导安装；不打包运行时进 nupkg（保持安装包小巧）。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # 上传 Release 资产所需
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    env:
+      APP_ID: Cryptunnel
+      CSPROJ: dotnet/src/Cryptunnel.App/Cryptunnel.App.csproj
+      MAIN_EXE: Cryptunnel.exe
+      ICON: dotnet/src/Cryptunnel.App/assets/app.ico
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # 版本号取自标签（v1.6.0 -> 1.6.0），与 csproj 保持一致由发布者保证。
+      - name: Resolve version from tag
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          echo "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          echo "Releasing version $v"
+
+      - name: Install Velopack CLI (vpk)
+        run: dotnet tool install --global vpk
+
+      # 框架依赖发布：--self-contained false，单文件，体积小（需用户装 .NET 10 Desktop Runtime）
+      - name: dotnet publish (framework-dependent, win-x64)
+        run: |
+          dotnet publish $env:CSPROJ -c Release -r win-x64 `
+            --self-contained false -p:PublishSingleFile=true `
+            -p:Version=$env:VERSION -o publish/win-x64
+
+      # 拉取上一版的更新清单，让 vpk 能生成增量包（delta）。首次发布没有则跳过。
+      - name: Download previous releases manifest (for delta)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          New-Item -ItemType Directory -Force -Path releases | Out-Null
+          $base = "https://github.com/objectyan/cryptunnel/releases/latest/download"
+          foreach ($f in @("releases.win.json", "RELEASES")) {
+            try {
+              Invoke-WebRequest -Uri "$base/$f" -OutFile "releases/$f" -UseBasicParsing
+              echo "downloaded previous $f"
+            } catch {
+              echo "no previous $f (first release?)"
+            }
+          }
+
+      # vpk pack：--framework 声明 .NET 10 Desktop Runtime 依赖（装前会校验/引导安装）
+      - name: Velopack pack
+        shell: pwsh
+        run: |
+          vpk pack `
+            --packId $env:APP_ID `
+            --packVersion $env:VERSION `
+            --packDir publish/win-x64 `
+            --mainExe $env:MAIN_EXE `
+            --outputDir releases `
+            --packTitle "Cryptunnel 隧道客户端" `
+            --packAuthors "Cryptunnel" `
+            --icon $env:ICON `
+            --framework net10.0-x64-desktop `
+            --channel win
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Cryptunnel ${{ env.VERSION }}
+          generate_release_notes: true
+          files: |
+            releases/*.exe
+            releases/*.nupkg
+            releases/*.zip
+            releases/releases.win.json
+            releases/RELEASES
+          fail_on_unmatched_files: false

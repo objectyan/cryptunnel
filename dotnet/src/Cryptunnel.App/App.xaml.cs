@@ -6,6 +6,8 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 using Cryptunnel.App.Tray;
+using Cryptunnel.App.Update;
+using Velopack;
 
 namespace Cryptunnel.App;
 
@@ -16,6 +18,20 @@ public partial class App : Application
     private Mutex? _singleInstance;
     private bool _ownsMutex;
     private bool _reallyExiting;
+
+    /// <summary>
+    /// 自定义入口（csproj 里 StartupObject 指向这里）。Velopack 必须最先跑——
+    /// 它是安装/更新框架，会处理「正在更新、待重启、便携模式」等场景，抢在 WPF 初始化之前。
+    /// 之后正常走 WPF 启动：new App + InitializeComponent + Run（App.xaml 无 StartupUri，由 OnStartup 建窗）。
+    /// </summary>
+    [STAThread]
+    private static void Main(string[] args)
+    {
+        VelopackApp.Build().Run();
+        var app = new App();
+        app.InitializeComponent();
+        app.Run();
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -49,11 +65,23 @@ public partial class App : Application
         var win = new MainWindow();
         _tray = new AppTray(Controller, win);
 
-        if (e.Args.Length > 0 && File.Exists(e.Args[0]))
-            Controller.ImportFile(e.Args[0]);
+        // 自动更新（Velopack）：注入气泡/确认/重启回调，启动后静默检查。
+        // restart 回调里先停隧道再让 Velopack 应用更新并重启，避免带连接强杀。
+        UpdateService.Init(
+            notify: _tray.NotifyUpdate,
+            restart: ApplyUpdateAndRestart,
+            confirm: ConfirmRestartForUpdate,
+            status: _ => { });
+        UpdateService.KickoffSilentCheck();
+
+        // 自定义 Main 下 WPF 不再注入 StartupEventArgs.Args，统一读全局命令行
+        var args = Environment.GetCommandLineArgs().Skip(1).ToArray();
+
+        if (args.Length > 0 && File.Exists(args[0]))
+            Controller.ImportFile(args[0]);
 
         // 自启（注册表 Run 键带 --minimized）：直接缩到托盘、不弹主窗口，并给个轻量提示
-        var minimized = e.Args.Any(a => a.Equals("--minimized", StringComparison.OrdinalIgnoreCase));
+        var minimized = args.Any(a => a.Equals("--minimized", StringComparison.OrdinalIgnoreCase));
         if (minimized)
         {
             win.Hide();
@@ -79,6 +107,47 @@ public partial class App : Application
     {
         _reallyExiting = true;
         Shutdown();
+    }
+
+    /// <summary>下载好更新后弹确认：是否「现在重启」应用更新（否则下次启动时生效）。须在 UI 线程弹。</summary>
+    private bool ConfirmRestartForUpdate()
+    {
+        try
+        {
+            var disp = System.Windows.Application.Current?.Dispatcher;
+            if (disp == null) return false;
+            if (!disp.CheckAccess())
+                return disp.Invoke(ConfirmRestartForUpdateCore);
+            return ConfirmRestartForUpdateCore();
+        }
+        catch { return false; }
+    }
+
+    private bool ConfirmRestartForUpdateCore()
+    {
+        var r = MessageBox.Show(
+            "新版本已下载完成。\n\n是否现在重启 Cryptunnel 应用更新？\n（选择「否」则下次启动时自动生效）",
+            "Cryptunnel 更新就绪", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        return r == MessageBoxResult.Yes;
+    }
+
+    /// <summary>用户选「现在重启」：先停隧道，再让 Velopack 应用更新并重启到新版本。</summary>
+    private void ApplyUpdateAndRestart()
+    {
+        try
+        {
+            _reallyExiting = true;
+            Controller.Stop();   // 优雅停隧道，避免带连接强杀
+        }
+        catch { }
+        try
+        {
+            UpdateService.ApplyPendingAndRestart();
+        }
+        catch
+        {
+            Shutdown();
+        }
     }
 
     [DllImport("user32.dll", SetLastError = true)]

@@ -27,4 +27,17 @@
     <ProjectReference Include="..\Cryptunnel.Core\Cryptunnel.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- App.xaml 默认是 ApplicationDefinition，WPF 会给它自动生成 Main，与我们自定义的 Main 冲突(CS0017)。
+         改为 Page：不再自动生成入口点，完全由 App.Main 接管（Velopack 引导 + new App + Run）。
+         同时从 ApplicationDefinition 里移除，避免双重包含。 -->
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Velopack：安装/自动更新框架。vpk pack 打出的包由它完成升级与回滚。 -->
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+
 </Project>

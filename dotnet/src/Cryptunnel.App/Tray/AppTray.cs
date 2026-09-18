@@ -12,6 +12,9 @@ namespace Cryptunnel.App.Tray;
 
 public sealed class AppTray : IDisposable
 {
+    /// <summary>气泡通知回调（标题, 正文, 是否错误）。供 UpdateService 复用托盘的 NotifyIcon。</summary>
+    public delegate void TrayNotifier(string title, string text, bool error);
+
     private readonly NotifyIcon _icon;
     private readonly AppController _controller;
     private readonly Window _window;
@@ -48,6 +51,7 @@ public sealed class AppTray : IDisposable
         _controller.AutoStartChanged += v => autoStartItem.Checked = v;
         m.Items.Add(autoStartItem);
         m.Items.Add(new ToolStripSeparator());
+        m.Items.Add("检查更新", null, (_, _) => Update.UpdateService.CheckNowInteractive());
         m.Items.Add("关于", null, (_, _) => ShowAbout());
         m.Items.Add("退出", null, (_, _) => ((App)System.Windows.Application.Current).RequestExit());
         return m;
@@ -69,6 +73,25 @@ public sealed class AppTray : IDisposable
         _icon.BalloonTipText = "已随系统登录自动启动，隧道在后台运行。双击托盘图标可打开主窗口。";
         _icon.BalloonTipIcon = ToolTipIcon.Info;
         _icon.ShowBalloonTip(3000);
+    }
+
+    /// <summary>更新相关气泡（供 UpdateService 回调）。手动检查/已是最新/可更新/失败都走这里。</summary>
+    public void NotifyUpdate(string title, string text, bool error)
+    {
+        // NotifyIcon 是 WinForms 组件，气泡必须在创建它的 UI 线程弹；兜底直接弹。
+        void Show()
+        {
+            _icon.BalloonTipTitle = title;
+            _icon.BalloonTipText = text;
+            _icon.BalloonTipIcon = error ? ToolTipIcon.Error : ToolTipIcon.Info;
+            _icon.ShowBalloonTip(6000);
+        }
+        try
+        {
+            var disp = System.Windows.Application.Current?.Dispatcher;
+            if (disp != null && !disp.CheckAccess()) disp.Invoke(Show); else Show();
+        }
+        catch { }
     }
 
     private void ShowWindow()
