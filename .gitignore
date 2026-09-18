@@ -23,6 +23,8 @@ __pycache__/
 
 # ---- .NET 构建产物 ----
 **/bin/
+# 放行 Rust 的 src/bin/（cargo 二进制源码目录，非构建产物）
+!dotnet/rust/**/src/bin/
 **/obj/
 *.cache
 *.user
@@ -40,6 +42,10 @@ __pycache__/
 
 # ---- 本地 agent / 工具状态（不入库）----
 .workbuddy/
+
+# ---- Rust / Cargo 构建产物 ----
+# dotnet/rust 下的 target/ 已被上面全局 target/ 覆盖，此处仅注释说明；
+# 全局否定规则只放行 java 源码包，不影响 rust 构建产物被忽略。
 
 # ---- 发布产物（761MB，保留在本地磁盘，不进 git）----
 packaging/

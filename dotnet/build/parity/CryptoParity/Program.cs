@@ -37,6 +37,13 @@ internal static class Program
             return 0;
         }
 
+        // --verify-rust <file> 模式：解开 Rust 侧现场加密的载荷，
+        // 验证「Rust 加密 -> C# 解密」（Rust 客户端可行性校验的反方向闭环）。
+        if (args.Length > 1 && args[0] == "--verify-rust")
+        {
+            return RustPayloadChecks.Run(args[1]);
+        }
+
         Console.WriteLine("=== Cryptunnel 加密跨语言对齐自检 ===");
         Console.WriteLine();
 

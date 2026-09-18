@@ -1,0 +1,157 @@
+//! SM4 分组密码核心（GB/T 32907-2016）：128 位分组、128 位密钥、32 轮。
+//!
+//! 逐行移植自已验证的 C# `Sm4Engine.cs`，S 盒 / FK / CK / 轮函数完全按国标。
+//! 用 GB/T 32907-2016 附录 A.1 官方向量守护正确性。
+//!
+//! 本模块只做**单个分组**的加解密；CBC 链接与 PKCS7 填充在 `cipher` 模块。
+
+pub const BLOCK_SIZE: usize = 16;
+
+/// S 盒，来自 GB/T 32907-2016 表 1。
+const SBOX: [u8; 256] = [
+    0xd6, 0x90, 0xe9, 0xfe, 0xcc, 0xe1, 0x3d, 0xb7, 0x16, 0xb6, 0x14, 0xc2, 0x28, 0xfb, 0x2c, 0x05,
+    0x2b, 0x67, 0x9a, 0x76, 0x2a, 0xbe, 0x04, 0xc3, 0xaa, 0x44, 0x13, 0x26, 0x49, 0x86, 0x06, 0x99,
+    0x9c, 0x42, 0x50, 0xf4, 0x91, 0xef, 0x98, 0x7a, 0x33, 0x54, 0x0b, 0x43, 0xed, 0xcf, 0xac, 0x62,
+    0xe4, 0xb3, 0x1c, 0xa9, 0xc9, 0x08, 0xe8, 0x95, 0x80, 0xdf, 0x94, 0xfa, 0x75, 0x8f, 0x3f, 0xa6,
+    0x47, 0x07, 0xa7, 0xfc, 0xf3, 0x73, 0x17, 0xba, 0x83, 0x59, 0x3c, 0x19, 0xe6, 0x85, 0x4f, 0xa8,
+    0x68, 0x6b, 0x81, 0xb2, 0x71, 0x64, 0xda, 0x8b, 0xf8, 0xeb, 0x0f, 0x4b, 0x70, 0x56, 0x9d, 0x35,
+    0x1e, 0x24, 0x0e, 0x5e, 0x63, 0x58, 0xd1, 0xa2, 0x25, 0x22, 0x7c, 0x3b, 0x01, 0x21, 0x78, 0x87,
+    0xd4, 0x00, 0x46, 0x57, 0x9f, 0xd3, 0x27, 0x52, 0x4c, 0x36, 0x02, 0xe7, 0xa0, 0xc4, 0xc8, 0x9e,
+    0xea, 0xbf, 0x8a, 0xd2, 0x40, 0xc7, 0x38, 0xb5, 0xa3, 0xf7, 0xf2, 0xce, 0xf9, 0x61, 0x15, 0xa1,
+    0xe0, 0xae, 0x5d, 0xa4, 0x9b, 0x34, 0x1a, 0x55, 0xad, 0x93, 0x32, 0x30, 0xf5, 0x8c, 0xb1, 0xe3,
+    0x1d, 0xf6, 0xe2, 0x2e, 0x82, 0x66, 0xca, 0x60, 0xc0, 0x29, 0x23, 0xab, 0x0d, 0x53, 0x4e, 0x6f,
+    0xd5, 0xdb, 0x37, 0x45, 0xde, 0xfd, 0x8e, 0x2f, 0x03, 0xff, 0x6a, 0x72, 0x6d, 0x6c, 0x5b, 0x51,
+    0x8d, 0x1b, 0xaf, 0x92, 0xbb, 0xdd, 0xbc, 0x7f, 0x11, 0xd9, 0x5c, 0x41, 0x1f, 0x10, 0x5a, 0xd8,
+    0x0a, 0xc1, 0x31, 0x88, 0xa5, 0xcd, 0x7b, 0xbd, 0x2d, 0x74, 0xd0, 0x12, 0xb8, 0xe5, 0xb4, 0xb0,
+    0x89, 0x69, 0x97, 0x4a, 0x0c, 0x96, 0x77, 0x7e, 0x65, 0xb9, 0xf1, 0x09, 0xc5, 0x6e, 0xc6, 0x84,
+    0x18, 0xf0, 0x7d, 0xec, 0x3a, 0xdc, 0x4d, 0x20, 0x79, 0xee, 0x5f, 0x3e, 0xd7, 0xcb, 0x39, 0x48,
+];
+
+/// 系统参数 FK，用于密钥扩展的初始异或。
+const FK: [u32; 4] = [0xa3b1bac6, 0x56aa3350, 0x677d9197, 0xb27022dc];
+
+/// 固定参数 CK，32 轮各一个。
+const CK: [u32; 32] = [
+    0x00070e15, 0x1c232a31, 0x383f464d, 0x545b6269,
+    0x70777e85, 0x8c939aa1, 0xa8afb6bd, 0xc4cbd2d9,
+    0xe0e7eef5, 0xfc030a11, 0x181f262d, 0x343b4249,
+    0x50575e65, 0x6c737a81, 0x888f969d, 0xa4abb2b9,
+    0xc0c7ced5, 0xdce3eaf1, 0xf8ff060d, 0x141b2229,
+    0x30373e45, 0x4c535a61, 0x686f767d, 0x848b9299,
+    0xa0a7aeb5, 0xbcc3cad1, 0xd8dfe6ed, 0xf4fb0209,
+    0x10171e25, 0x2c333a41, 0x484f565d, 0x646b7279,
+];
+
+pub struct Sm4Engine {
+    round_keys: [u32; 32],
+}
+
+impl Sm4Engine {
+    /// `key` 必须是 16 字节。
+    pub fn new(key: &[u8]) -> Self {
+        assert_eq!(key.len(), BLOCK_SIZE, "SM4 密钥必须是 16 字节");
+        let mut e = Sm4Engine { round_keys: [0; 32] };
+        e.expand_key(key);
+        e
+    }
+
+    pub fn encrypt_block(&self, input: &[u8], output: &mut [u8]) {
+        self.process_block(input, output, true);
+    }
+
+    /// SM4 解密即把轮密钥逆序使用。
+    pub fn decrypt_block(&self, input: &[u8], output: &mut [u8]) {
+        self.process_block(input, output, false);
+    }
+
+    fn process_block(&self, input: &[u8], output: &mut [u8], encrypt: bool) {
+        assert_eq!(input.len(), BLOCK_SIZE);
+        assert_eq!(output.len(), BLOCK_SIZE);
+
+        let mut x0 = read_be(input, 0);
+        let mut x1 = read_be(input, 4);
+        let mut x2 = read_be(input, 8);
+        let mut x3 = read_be(input, 12);
+
+        for i in 0..32 {
+            let rk = self.round_keys[if encrypt { i } else { 31 - i }];
+            let next = x0 ^ transform_t(x1 ^ x2 ^ x3 ^ rk);
+            x0 = x1;
+            x1 = x2;
+            x2 = x3;
+            x3 = next;
+        }
+
+        // 反序变换 R
+        write_be(output, 0, x3);
+        write_be(output, 4, x2);
+        write_be(output, 8, x1);
+        write_be(output, 12, x0);
+    }
+
+    fn expand_key(&mut self, key: &[u8]) {
+        let mut k0 = read_be(key, 0) ^ FK[0];
+        let mut k1 = read_be(key, 4) ^ FK[1];
+        let mut k2 = read_be(key, 8) ^ FK[2];
+        let mut k3 = read_be(key, 12) ^ FK[3];
+
+        for i in 0..32 {
+            let next = k0 ^ transform_t_prime(k1 ^ k2 ^ k3 ^ CK[i]);
+            self.round_keys[i] = next;
+            k0 = k1;
+            k1 = k2;
+            k2 = k3;
+            k3 = next;
+        }
+    }
+}
+
+/// 合成置换 T = L(τ(·))，用于轮函数。
+fn transform_t(a: u32) -> u32 {
+    let b = substitute_bytes(a);
+    b ^ b.rotate_left(2) ^ b.rotate_left(10) ^ b.rotate_left(18) ^ b.rotate_left(24)
+}
+
+/// 合成置换 T' = L'(τ(·))，用于密钥扩展。
+fn transform_t_prime(a: u32) -> u32 {
+    let b = substitute_bytes(a);
+    b ^ b.rotate_left(13) ^ b.rotate_left(23)
+}
+
+/// 非线性变换 τ：逐字节过 S 盒。
+fn substitute_bytes(a: u32) -> u32 {
+    (SBOX[((a >> 24) & 0xFF) as usize] as u32) << 24
+        | (SBOX[((a >> 16) & 0xFF) as usize] as u32) << 16
+        | (SBOX[((a >> 8) & 0xFF) as usize] as u32) << 8
+        | SBOX[(a & 0xFF) as usize] as u32
+}
+
+fn read_be(src: &[u8], offset: usize) -> u32 {
+    u32::from_be_bytes([src[offset], src[offset + 1], src[offset + 2], src[offset + 3]])
+}
+
+fn write_be(dst: &mut [u8], offset: usize, value: u32) {
+    dst[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// GB/T 32907-2016 附录 A.1 官方单分组向量。
+    #[test]
+    fn gbt_a1_official_vector() {
+        let key = hex::decode("0123456789abcdeffedcba9876543210").unwrap();
+        let plain = hex::decode("0123456789abcdeffedcba9876543210").unwrap();
+        let expected = hex::decode("681edf34d206965e86b3e94f536e4246").unwrap();
+
+        let engine = Sm4Engine::new(&key);
+        let mut out = [0u8; BLOCK_SIZE];
+        engine.encrypt_block(&plain, &mut out);
+        assert_eq!(out[..], expected[..], "GB/T A.1 加密向量不匹配");
+
+        let mut back = [0u8; BLOCK_SIZE];
+        engine.decrypt_block(&out, &mut back);
+        assert_eq!(back[..], plain[..], "GB/T A.1 解密往返失败");
+    }
+}
