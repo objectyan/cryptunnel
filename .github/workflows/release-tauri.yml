@@ -233,7 +233,9 @@ jobs:
           if 'latest.json' in assets:
               gh('-X', 'DELETE', f"repos/{repo}/releases/assets/{assets['latest.json']}")
               print('deleted existing latest.json')
-          subprocess.run(['gh', 'api', '-X', 'POST',
+          # 资产上传端点在 uploads.github.com，gh api 默认打 api.github.com（裸 404，
+          # 实测 api.github.com 404 / uploads.github.com 201）。--hostname 切主机。
+          subprocess.run(['gh', 'api', '--hostname', 'uploads.github.com', '-X', 'POST',
                           f"repos/{repo}/releases/{rel['id']}/assets?name=latest.json",
                           '-H', 'Content-Type: application/json',
                           '--input', 'latest.json'], check=True)
