@@ -741,6 +741,7 @@ dependencies = [
  "cryptunnel-tunnel",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",

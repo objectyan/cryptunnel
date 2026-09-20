@@ -127,9 +127,11 @@ pub fn run() {
             get_config_dir,
             get_log_dir,
             reveal_log_file,
+            reveal_config_dir,
             read_project,
             save_project,
             delete_project,
+            import_project_yaml,
             // spike 手动模式（兼容保留）
             start_tunnel,
             stop_tunnel,
@@ -395,6 +397,18 @@ fn reveal_log_file(app: tauri::AppHandle, mgr: tauri::State<'_, TunnelManager>) 
     Ok(file.display().to_string())
 }
 
+/// 在系统文件管理器中打开配置目录（.NET 老版「配置目录」按钮的对应行为）。
+#[tauri::command]
+fn reveal_config_dir(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = tunnel_state::resolve_config_dir(&app);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建配置目录失败：{e}"))?;
+    app.opener()
+        .open_path(dir.display().to_string(), None::<&str>)
+        .map_err(|e| format!("打开失败：{e}"))?;
+    Ok(dir.display().to_string())
+}
+
 /// 读取单个项目原始文件（编辑器回填）。
 #[tauri::command]
 fn read_project(app: tauri::AppHandle, name: String) -> Result<serde_json::Value, String> {
@@ -412,6 +426,46 @@ fn save_project(app: tauri::AppHandle, pf: serde_json::Value) -> Result<String, 
     let dir = tunnel_state::resolve_config_dir(&app);
     let path = tunnel_state::save_project_file(&dir, &project)?;
     Ok(format!("已保存：{}", path.display()))
+}
+
+/// 导入拖拽进来的 YAML 项目文件（.NET 老版拖拽导入的对应行为）。
+///
+/// 原文落盘（不改写 YAML 结构，与 .NET `ImportProjectFile` 一致），但落盘前
+/// 必须过与目录加载同一套字段校验 + 与存量项目的 name/端口冲突检查——
+/// 坏文件一旦落盘会在每次刷新列表时反复报错，必须挡在目录之外。
+/// 同名项目已存在时拒绝导入（让前端先删除或改名），避免静默覆盖他人配置。
+#[tauri::command]
+fn import_project_yaml(
+    app: tauri::AppHandle,
+    filename: String,
+    content: String,
+) -> Result<String, String> {
+    let pf: cryptunnel_tunnel::ProjectFile =
+        serde_yaml::from_str(&content).map_err(|e| format!("YAML 解析失败：{e}"))?;
+    cryptunnel_tunnel::validate_project_fields(&pf)?;
+    let name = pf.name.clone().unwrap_or_default();
+
+    // 与存量项目冲突检查（复用目录加载结果，口径与列表页一致）。
+    let dir = tunnel_state::resolve_config_dir(&app);
+    let existing = cryptunnel_tunnel::load_config_dir(&dir);
+    if existing.configs.iter().any(|c| c.name == name) {
+        return Err(format!("项目「{name}」已存在，请先删除或改名后再导入。"));
+    }
+    let port = pf.local.as_ref().and_then(|l| l.port).unwrap_or(0) as u16;
+    if let Some(c) = existing.configs.iter().find(|c| c.local_port == port) {
+        return Err(format!(
+            "local.port={port} 已被项目「{}」占用。",
+            c.name
+        ));
+    }
+
+    // 原文落盘（原子写），文件名以内容里的 name 为准（与列表刷新口径一致）。
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建配置目录失败：{e}"))?;
+    let path = tunnel_state::project_file_path(&dir, &name);
+    let tmp = dir.join(format!(".{name}.yaml.tmp"));
+    std::fs::write(&tmp, &content).map_err(|e| format!("写入失败：{e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("落盘失败：{e}"))?;
+    Ok(format!("已导入 {filename} → 项目「{name}」。"))
 }
 
 /// 删除项目配置（先停隧道，再删文件）。

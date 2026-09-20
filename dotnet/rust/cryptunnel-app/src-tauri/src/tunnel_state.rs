@@ -260,10 +260,13 @@ pub fn start(
     start_with_config(app, mgr, cfg)
 }
 
-/// 配置目录解析（对齐 .NET `PathResolver`）。
+/// 配置目录解析（对齐 .NET `PathResolver.ConfigDir`）。
 ///
 /// - 便携模式：exe 旁存在 `portable.txt` → 配置在 exe 旁 `config.d/`。
-/// - 安装模式：平台用户配置目录下 `Cryptunnel/config.d/`。
+/// - 安装模式：平台用户配置目录下 **`Cryptunnel/config.d/`**——注意不是 Tauri 的
+///   `app_config_dir()`（那个带 `io.github.objectyan.cryptunnel` 子目录），
+///   必须取其父目录再拼 `Cryptunnel`，才能落在和老版相同的
+///   `%APPDATA%\Cryptunnel\config.d`（Roaming）。
 pub fn resolve_config_dir(app: &AppHandle) -> PathBuf {
     let exe_dir = std::env::current_exe()
         .ok()
@@ -272,10 +275,13 @@ pub fn resolve_config_dir(app: &AppHandle) -> PathBuf {
     if exe_dir.join("portable.txt").exists() {
         return exe_dir.join("config.d");
     }
+    // app_config_dir() = %APPDATA%\io.github.objectyan.cryptunnel（Roaming）。
+    // 取其父目录（%APPDATA%）再拼 Cryptunnel\config.d，与老版逐字节一致。
     app.path()
         .app_config_dir()
-        .map(|p| p.join("config.d"))
-        .unwrap_or_else(|_| exe_dir.join("config.d"))
+        .ok()
+        .and_then(|p| p.parent().map(|base| base.join("Cryptunnel").join("config.d")))
+        .unwrap_or_else(|| exe_dir.join("config.d"))
 }
 
 /// 项目配置文件路径：`<configDir>/<name>.yaml`。

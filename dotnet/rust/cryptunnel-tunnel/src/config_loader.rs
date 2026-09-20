@@ -118,6 +118,54 @@ fn file_name(p: &Path) -> String {
         .unwrap_or_else(|| p.display().to_string())
 }
 
+/// 单项目字段校验（导入 / 保存前调用）：schemaVersion / name 形态 / serverUrl /
+/// aesKey+authKey / local.port 范围 / cipher 归一，与 `resolve` 逐条对齐。
+///
+/// 目录级约束（name/port 与其他项目冲突、defaults 合并）不在这里检查——
+/// 导入方应把「与存量项目的冲突」作为附加检查（见 app 层 import 命令）。
+pub fn validate_project_fields(pf: &ProjectFile) -> Result<(), String> {
+    if pf.defaults.is_some() && pf.name.is_none() {
+        return Err("这是纯 defaults 文件，不是项目配置，不能按项目导入。".into());
+    }
+    if pf.schema_version != SUPPORTED_SCHEMA {
+        return Err(format!(
+            "schemaVersion={} 不被支持（要求 {SUPPORTED_SCHEMA}，拒绝导入以免误兼容）",
+            pf.schema_version
+        ));
+    }
+    let name = pf.name.clone().unwrap_or_default();
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err("name 只能是小写字母/数字/连字符 [a-z0-9-]".into());
+    }
+    let server_url = pf
+        .server_url
+        .clone()
+        .unwrap_or_default()
+        .trim_end_matches('/')
+        .to_string();
+    if server_url.is_empty()
+        || !(server_url.starts_with("http://") || server_url.starts_with("https://"))
+    {
+        return Err("serverUrl 必填且以 http:// 或 https:// 开头".into());
+    }
+    let aes_key = pf.aes_key.clone().unwrap_or_default();
+    let auth_key = pf.auth_key.clone().unwrap_or_default();
+    if aes_key.trim().is_empty() || auth_key.trim().is_empty() {
+        return Err("aesKey 与 authKey 必填且非空".into());
+    }
+    let port = pf.local.as_ref().and_then(|l| l.port).unwrap_or(0);
+    if !(1024..=65535).contains(&port) {
+        return Err(format!("local.port={port} 超出范围（1024-65535）"));
+    }
+    let cipher_raw = pf.cipher.as_deref().unwrap_or("");
+    crate::registry::normalize(cipher_raw).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// 解析单个 yaml 文件；schemaVersion 不符只记错误、仍返回结构（与 .NET 一致——
 /// 错误已列出，该文件后续在第二遍按规则处理）。
 fn try_parse(file: &Path, errors: &mut Vec<ConfigError>) -> Option<ProjectFile> {
@@ -412,6 +460,37 @@ local:
         assert_eq!(c.cipher, DEFAULT_CIPHER);
         assert_eq!(c.http_base_path, "/cryptunnel");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn validate_project_fields_accepts_good() {
+        let pf: ProjectFile = serde_yaml::from_str(GOOD).unwrap();
+        assert!(validate_project_fields(&pf).is_ok());
+    }
+
+    #[test]
+    fn validate_project_fields_rejects_bad() {
+        // schemaVersion 不对
+        let pf: ProjectFile = serde_yaml::from_str(&GOOD.replace("schemaVersion: 1", "schemaVersion: 2")).unwrap();
+        assert!(validate_project_fields(&pf).unwrap_err().contains("schemaVersion"));
+        // name 形态非法
+        let pf: ProjectFile = serde_yaml::from_str(&GOOD.replace("name: crm-prod", "name: CRM_Prod")).unwrap();
+        assert!(validate_project_fields(&pf).unwrap_err().contains("name"));
+        // 纯 defaults 文件不能按项目导入
+        let pf: ProjectFile = serde_yaml::from_str("defaults:\n  chunkSize: 2048\n").unwrap();
+        assert!(validate_project_fields(&pf).unwrap_err().contains("defaults"));
+        // serverUrl 缺协议
+        let pf: ProjectFile = serde_yaml::from_str(&GOOD.replace("http://db.internal:8080", "db.internal:8080")).unwrap();
+        assert!(validate_project_fields(&pf).unwrap_err().contains("serverUrl"));
+        // 缺密钥
+        let pf: ProjectFile = serde_yaml::from_str(&GOOD.replace("authKey: \"hk\"", "authKey: \"\"")).unwrap();
+        assert!(validate_project_fields(&pf).unwrap_err().contains("aesKey"));
+        // 端口越界
+        let pf: ProjectFile = serde_yaml::from_str(&GOOD.replace("port: 3307", "port: 80")).unwrap();
+        assert!(validate_project_fields(&pf).unwrap_err().contains("local.port"));
+        // cipher 未知值
+        let pf: ProjectFile = serde_yaml::from_str(&(GOOD.to_string() + "cipher: chacha20\n")).unwrap();
+        assert!(validate_project_fields(&pf).is_err());
     }
 
     #[test]
