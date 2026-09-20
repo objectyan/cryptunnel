@@ -59,9 +59,9 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: dotnet/rust/cryptunnel-crypto
-      - name: cargo test (workspace: crypto + tunnel)
+      - name: "cargo test (workspace: crypto + tunnel)"
         working-directory: dotnet/rust/cryptunnel-crypto
         run: cargo test --workspace --exclude cryptunnel-app
-      - name: cargo check (tauri app)
+      - name: "cargo check (tauri app)"
         working-directory: dotnet/rust/cryptunnel-app/src-tauri
         run: cargo check
