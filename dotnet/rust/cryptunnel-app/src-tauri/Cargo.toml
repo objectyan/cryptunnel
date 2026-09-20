@@ -5,6 +5,8 @@ edition = "2021"
 description = "Cryptunnel 隧道客户端（Rust + Tauri 重写，多平台托盘工具）"
 license = "Apache-2.0"
 default-run = "cryptunnel-app"
+# workspace 根在 ../../cryptunnel-crypto（cargo ≥1.90 起成员在根目录之外时必须显式指回根，否则硬错误）
+workspace = "../../cryptunnel-crypto"
 
 [lib]
 name = "cryptunnel_app_lib"
@@ -26,9 +28,4 @@ cryptunnel-crypto = { path = "../../cryptunnel-crypto" }
 cryptunnel-tunnel = { path = "../../cryptunnel-tunnel" }
 tokio = { version = "1", features = ["full"] }
 
-[profile.release]
-panic = "abort"
-codegen-units = 1
-lto = true
-opt-level = "s"
-strip = true
+# 注意：[profile.release] 在 workspace 根（cryptunnel-crypto/Cargo.toml），成员包里的 profile 会被 cargo 忽略。

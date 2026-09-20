@@ -372,6 +372,7 @@ pub fn try_read_file(path: &Path) -> Result<ProjectFile, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DEFAULT_CIPHER;
     use std::fs;
 
     fn write(dir: &Path, name: &str, content: &str) {

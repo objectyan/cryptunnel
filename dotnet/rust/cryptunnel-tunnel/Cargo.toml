@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 description = "Cryptunnel 隧道核心（Rust 重写）：本地 TCP 监听 → 加密 WebSocket/HTTP 隧道 → 服务端，与 .NET/Java 逐点对齐"
 license = "Apache-2.0"
+# workspace 根在兄弟目录 cryptunnel-crypto（cargo ≥1.90 起成员在根目录之外时必须显式指回根，否则硬错误）
+workspace = "../cryptunnel-crypto"
 
 [dependencies]
 cryptunnel-crypto = { path = "../cryptunnel-crypto" }

@@ -8,6 +8,15 @@ license = "Apache-2.0"
 [workspace]
 members = [".", "../cryptunnel-tunnel", "../cryptunnel-app/src-tauri"]
 
+# release 优化配置必须在 workspace 根才生效（成员包里的 profile 会被忽略）。
+# 主要给 cryptunnel-app 出包用：体积小、链接时优化。
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
 [dependencies]
 aes = "0.8"
 cbc = "0.1"
