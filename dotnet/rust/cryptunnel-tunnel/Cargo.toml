@@ -1,6 +1,6 @@
 [package]
 name = "cryptunnel-tunnel"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Cryptunnel 隧道核心（Rust 重写）：本地 TCP 监听 → 加密 WebSocket/HTTP 隧道 → 服务端，与 .NET/Java 逐点对齐"
 license = "Apache-2.0"

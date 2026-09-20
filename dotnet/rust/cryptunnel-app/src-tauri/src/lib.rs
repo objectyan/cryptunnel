@@ -32,10 +32,18 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &sep, &quit])?;
 
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .expect("default_window_icon missing (bundle.icon 未配置)");
+    // 托盘图标用 ICO 里的 128×128 PNG 帧，不用 256 的 default_window_icon()：
+    // ① from_bytes 解整 ICO 只取第一帧（16×16，任务栏必模糊）；
+    // ② 直接用 256 PNG 缩到 ~16-32px 同样发白失真。
+    // 128 帧下采样到托盘尺寸干净锐利，且 RGBA 字节是 256 的 1/4。
+    // icon.ico 帧布局（PNG 编码）：128×128 帧在字节区间 [1835..2920)。
+    let ico: &[u8] = include_bytes!("../icons/icon.ico");
+    let tray_png = ico
+        .get(1835..2920)
+        .expect("icon.ico 布局变化：128×128 帧区间越界，需重新解析帧偏移");
+    // tray_png 已是纯 PNG 字节（非完整 ICO），from_bytes 正常解码。
+    let icon = tauri::image::Image::from_bytes(tray_png)
+        .expect("icon.ico 128×128 PNG 帧解码失败");
 
     let _tray = TrayIconBuilder::with_id("cryptunnel-tray")
         .icon(icon)
