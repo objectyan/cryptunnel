@@ -118,31 +118,56 @@ public class Sm4CipherTest {
     // ---------- 跨算法隔离 ----------
 
     /**
-     * 帧同构不等于可互解：SM4 密钥派生前缀为 {@code "SM4:"}，
-     * 与 AES 的 {@code "AES:"} 不同，且分组算法不同。
-     * 注意 HMAC 密钥两者一致，所以 HMAC 会校验通过，
-     * 真正的拒绝点在 SM4 解密后的 PKCS7 填充校验——这也必须是硬失败。
+     * 跨算法拒绝的可测口径必须诚实：SM4 与 AES 同为 128 位分组 + PKCS7，
+     * 且 HMAC 密钥相同（同为 {@code SHA256("HMAC:"+k)}，这是「帧同构」设计意图，
+     * 线级契约记录在案），因此错误密钥解出的末块恰好构成合法填充的概率约 1/256，
+     * 偶发样本会被「成功解出」——java-jakarta CI 2026-09-20 就真实命中过一次
+     * （输出 63 字节）。<b>跨算法硬失败是概率防线，不是确定性防线</b>；
+     * 部署层的真正防线是两端配置核对 + 服务端日志 cipherId（见 ADR-0003）。
+     *
+     * <p>所以本测试的口径是「拒绝率必须 ≥ 99%」：512 个独立样本（随机 IV），
+     * 若隔离机制整体失效（例如有人把密钥派生前缀改成相同），解出率会是 ~100%，
+     * 与 1/256 的天然噪音有数量级差距，测试稳定区分两种情形。
+     * 采样耗时亚毫秒级/个，测试总时长与原来相当。</p>
      */
+    private static final int CROSS_SAMPLES = 512;
+
+    /** 天然填充巧合容忍上限（约 1/256 × 512 ≈ 2 个的期望，放宽到 5 个防抖动）。 */
+    private static final int CROSS_LUCKY_TOLERANCE = 5;
+
     @Test
     public void open_aesCbcPayload_fails() {
-        String aes = new AesCbcHmacSha256Cipher().seal(PLAIN, RAW_KEY);
-        try {
-            byte[] out = sm4.open(aes, RAW_KEY);
-            fail("AES 载荷不应被 SM4 解出，实际得到 " + out.length + " 字节");
-        } catch (TunnelCryptoException expected) {
-            assertNotNull(expected.getMessage());
+        TunnelCipher aes = new AesCbcHmacSha256Cipher();
+        int lucky = 0;
+        for (int i = 0; i < CROSS_SAMPLES; i++) {
+            try {
+                sm4.open(aes.seal(PLAIN, RAW_KEY), RAW_KEY);
+                lucky++; // 末块填充巧合，期望 ~512/256 = 2 个，不计入隔离失效
+            } catch (TunnelCryptoException expected) {
+                // 期望路径：PKCS7 填充校验拒绝。
+            }
         }
+        assertTrue("AES→SM4 方向解出 " + lucky + "/" + CROSS_SAMPLES
+                + " 个，远超 1/256 的天然填充巧合——跨算法隔离疑似失效"
+                + "（检查密钥派生前缀 \"AES:\"/\"SM4:\" 是否被改成相同）",
+                lucky <= CROSS_LUCKY_TOLERANCE);
     }
 
     @Test
     public void aesCbc_cannotOpenSm4Payload() {
-        String sealed = sm4.seal(PLAIN, RAW_KEY);
-        try {
-            byte[] out = new AesCbcHmacSha256Cipher().open(sealed, RAW_KEY);
-            fail("SM4 载荷不应被 AES 解出，实际得到 " + out.length + " 字节");
-        } catch (TunnelCryptoException expected) {
-            assertNotNull(expected.getMessage());
+        TunnelCipher aes = new AesCbcHmacSha256Cipher();
+        int lucky = 0;
+        for (int i = 0; i < CROSS_SAMPLES; i++) {
+            try {
+                aes.open(sm4.seal(PLAIN, RAW_KEY), RAW_KEY);
+                lucky++;
+            } catch (TunnelCryptoException expected) {
+                // 期望路径：PKCS7 填充校验拒绝。
+            }
         }
+        assertTrue("SM4→AES 方向解出 " + lucky + "/" + CROSS_SAMPLES
+                + " 个，远超 1/256 的天然填充巧合——跨算法隔离疑似失效",
+                lucky <= CROSS_LUCKY_TOLERANCE);
     }
 
     // ---------- 注册表 ----------
