@@ -247,7 +247,7 @@ async fn check_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
             Err(e) => last_err = e.to_string(),
         }
     }
-    Err(format!("检查更新失败：{last_err}"))
+    Err(format!("{last_err}"))
 }
 
 /// 下载并安装更新，完成后重启应用。
