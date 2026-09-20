@@ -6,6 +6,7 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 
 mod tunnel_state;
+mod file_log;
 
 use serde::Serialize;
 use std::sync::Arc;
@@ -81,10 +82,21 @@ pub fn run() {
         // 自动更新（替代 Velopack，跨平台）+ 进程重启
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // 系统文件管理器/浏览器打开（日志目录）
+        .plugin(tauri_plugin_opener::init())
         // 隧道全局状态（Arc 共享，便于后台任务自持引用）
         .manage(std::sync::Arc::new(TunnelManager::new()))
         .setup(|app| {
             build_tray(app)?;
+            // 装配会话日志落盘（对齐 .NET 老版 logs/proxy.log 滚动规则）。
+            // 目录解析失败/无权限时 logger 仍然可用（写时吞错），绝不影响启动。
+            let log_dir = file_log::resolve_log_dir(&app.handle());
+            let logger = std::sync::Arc::new(file_log::FileLogger::new(
+                log_dir,
+                file_log::DEFAULT_MAX_FILE_SIZE_MB,
+                file_log::DEFAULT_RETAIN_DAYS,
+            ));
+            app.state::<TunnelManager>().attach_logger(logger);
             Ok(())
         })
         // 关窗不退出，只隐藏到托盘（后台常驻）
@@ -109,8 +121,11 @@ pub fn run() {
             stop_project,
             stop_all_projects,
             project_status,
+            health_check,
             // 项目管理
             get_config_dir,
+            get_log_dir,
+            reveal_log_file,
             read_project,
             save_project,
             delete_project,
@@ -318,6 +333,29 @@ fn project_status(mgr: tauri::State<'_, TunnelManager>, name: String) -> String 
     }
 }
 
+/// 对某项目执行一次手动健康检查（真实链路探活）。
+///
+/// 探活走与真实隧道相同的路径：WS 连接 → 加密认证 → 等 MySQL 握手包。
+/// 每次探活会让服务端真实建立并断开一条 MySQL 连接，这是诊断动作而非业务连接。
+/// 报告同时写入滚动文件日志（.NET 老版 `Controller.LogHealth` 的对应行为）。
+#[tauri::command]
+async fn health_check(mgr: tauri::State<'_, TunnelManager>, name: String) -> Result<String, String> {
+    let cfg = mgr
+        .get_config(&name)
+        .ok_or_else(|| format!("找不到项目「{name}」的配置，请先刷新列表。"))?;
+    let report = cryptunnel_tunnel::health_probe(&cfg).await;
+    let text = report.to_display_text();
+    if let Some(logger) = mgr.logger() {
+        let level = if report.healthy {
+            cryptunnel_tunnel::LogLevel::Info
+        } else {
+            cryptunnel_tunnel::LogLevel::Warn
+        };
+        logger.log(level, Some(&name), &format!("健康检查：\n{text}"));
+    }
+    Ok(text)
+}
+
 // ============================================================================
 // 项目管理：读 / 写 / 删
 // ============================================================================
@@ -326,6 +364,34 @@ fn project_status(mgr: tauri::State<'_, TunnelManager>, name: String) -> String 
 #[tauri::command]
 fn get_config_dir(app: tauri::AppHandle) -> String {
     tunnel_state::resolve_config_dir(&app).display().to_string()
+}
+
+/// 返回日志目录路径（设置窗展示 + 「打开日志目录」用；与老版同路径）。
+///
+/// 优先返回正在使用的 logger 的实际目录（与 resolve 结果理论上相同，
+/// 但以 logger 为准可以避免「显示的目录」和「真正写入的目录」漂移）。
+#[tauri::command]
+fn get_log_dir(app: tauri::AppHandle, mgr: tauri::State<'_, TunnelManager>) -> String {
+    if let Some(logger) = mgr.logger() {
+        return logger.dir().display().to_string();
+    }
+    file_log::resolve_log_dir(&app).display().to_string()
+}
+
+/// 在系统文件管理器中显示当前日志文件（proxy.log）。
+#[tauri::command]
+fn reveal_log_file(app: tauri::AppHandle, mgr: tauri::State<'_, TunnelManager>) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let logger = mgr.logger().ok_or("日志器未初始化。")?;
+    let file = logger.dir().join("proxy.log");
+    // 文件可能还没写过任何一行：先确保存在，否则系统管理器打开一个不存在的路径。
+    if !file.exists() {
+        logger.log(cryptunnel_tunnel::LogLevel::Info, None, "（打开日志目录）");
+    }
+    app.opener()
+        .reveal_item_in_dir(&file)
+        .map_err(|e| format!("打开失败：{e}"))?;
+    Ok(file.display().to_string())
 }
 
 /// 读取单个项目原始文件（编辑器回填）。

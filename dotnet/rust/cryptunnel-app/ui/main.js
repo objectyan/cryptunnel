@@ -6,11 +6,19 @@ import { getVersion } from "https://unpkg.com/@tauri-apps/api@2/app.js";
 
 const $ = (id) => document.getElementById(id);
 
-// 内存态：项目列表（含运行状态），以 name 为键。
-let projects = []; // [{name, display_name, enabled, server_url, local_port, cipher, running}]
+// ============================================================================
+// 内存态
+// ============================================================================
+// projects: [{name, display_name, enabled, server_url, local_port, cipher,
+//            running, state, connections, bytesIn, bytesOut, alert}]
+// state 取值与后端 state_text 对齐：监听中 / WS 连接中 / WS 已连接 /
+// HTTP 连接中 / HTTP 已连接 / 错误 / 已停止
+let projects = [];
 let editingName = null; // 编辑器当前编辑的项目名（null = 新建）
 
-// ---------- 视图切换 ----------
+// ============================================================================
+// 视图切换
+// ============================================================================
 function showView(name) {
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
   document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
@@ -22,89 +30,225 @@ document.querySelectorAll(".nav-btn").forEach((b) =>
   b.addEventListener("click", () => showView(b.dataset.view))
 );
 
-// ---------- 日志 ----------
-const dashLog = $("dash-log");
-const fullLog = $("full-log");
-const logFilter = $("log-filter");
+// ============================================================================
+// 日志：单一日志源（ring buffer）+ 两个面板（仪表盘/全屏）各自过滤渲染
+// ============================================================================
+const LOG_LEVELS = ["info", "warn", "error"]; // state 归入 info
+const LOG_CAP = 1500;
+let logSeq = 0;
+const logEntries = []; // {seq, time, tunnel, level, text}
+
+const LOG_PANELS = [
+  {
+    el: () => $("dash-log"),
+    project: () => $("log-filter").value,
+    level: () => $("dash-log-level").value,
+    search: () => $("dash-log-search").value,
+    autoscroll: () => $("dash-log-autoscroll").checked,
+  },
+  {
+    el: () => $("full-log"),
+    project: () => "", // 全屏页不再按项目过滤（仪表盘已有）
+    level: () => $("full-log-level").value,
+    search: () => $("full-log-search").value,
+    autoscroll: () => $("full-log-autoscroll").checked,
+  },
+];
+
+function levelOfKind(kind) {
+  if (kind === "warn") return "warn";
+  if (kind === "error" || kind === "fatal") return "error";
+  return "info"; // info / state / 其他
+}
+
+function compileSearch(pattern) {
+  if (!pattern) return null;
+  try {
+    return new RegExp(pattern, "i");
+  } catch {
+    // 非法正则不报错、不当过滤器——按普通子串匹配（对用户输入最宽容）。
+    const lower = pattern.toLowerCase();
+    return { test: (s) => s.toLowerCase().includes(lower) };
+  }
+}
+
+function entryVisible(e, panel) {
+  const proj = panel.project();
+  if (proj && e.tunnel !== proj) return false;
+  const lv = panel.level();
+  if (lv && e.level !== lv) return false;
+  const re = compileSearch(panel.search());
+  if (re && !re.test(e.text)) return false;
+  return true;
+}
+
+function renderPanel(panel) {
+  const el = panel.el();
+  el.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (const e of logEntries) {
+    if (!entryVisible(e, panel)) continue;
+    const line = document.createElement("div");
+    line.className = "log-line log-" + (e.level === "info" && e.state ? "state" : e.level);
+    line.textContent = `[${e.time}] ${e.tunnel ? `[${e.tunnel}] ` : ""}${e.text}`;
+    frag.appendChild(line);
+  }
+  el.appendChild(frag);
+  if (panel.autoscroll()) el.scrollTop = el.scrollHeight;
+}
+
+function renderAllPanels() {
+  for (const p of LOG_PANELS) renderPanel(p);
+}
 
 function appendLog(tunnel, kind, message) {
   const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
-  const tag = tunnel && tunnel !== "default" ? `[${tunnel}] ` : "";
-  const html = `[${time}] ${tag}${message}`;
-  for (const el of [dashLog, fullLog]) {
-    const line = document.createElement("div");
-    line.className = "log-line log-" + kind;
-    line.dataset.tunnel = tunnel || "";
-    line.textContent = html;
-    if (el === fullLog && logFilter.value && tunnel !== logFilter.value) {
-      line.style.display = "none";
-    }
-    el.appendChild(line);
-    while (el.children.length > 800) el.removeChild(el.firstChild);
-    el.scrollTop = el.scrollHeight;
-  }
-}
-
-logFilter.addEventListener("change", () => {
-  const v = logFilter.value;
-  fullLog.querySelectorAll(".log-line").forEach((l) => {
-    l.style.display = !v || l.dataset.tunnel === v ? "" : "none";
+  logEntries.push({
+    seq: logSeq++,
+    time,
+    tunnel: tunnel && tunnel !== "default" ? tunnel : "",
+    level: levelOfKind(kind),
+    state: kind === "state",
+    text: message,
   });
-});
-$("btn-clearlog").addEventListener("click", () => { dashLog.innerHTML = ""; fullLog.innerHTML = ""; });
-
-// ---------- 项目列表渲染 ----------
-function renderProjects() {
-  const wrap = $("project-list");
-  wrap.querySelectorAll(".proj").forEach((n) => n.remove());
-  $("empty-hint").style.display = projects.length ? "none" : "";
-
-  // 更新日志过滤器选项
-  const cur = logFilter.value;
-  logFilter.innerHTML = '<option value="">全部项目</option>';
-  for (const p of projects) {
-    const o = document.createElement("option");
-    o.value = p.name; o.textContent = p.display_name || p.name;
-    logFilter.appendChild(o);
-  }
-  logFilter.value = cur;
-
-  for (const p of projects) {
-    const el = document.createElement("div");
-    el.className = "proj" + (p.running ? " running" : "") + (p.enabled ? "" : " disabled");
-    el.innerHTML = `
-      <div class="proj-main">
-        <div class="proj-title">
-          <span class="proj-dot"></span>
-          <strong>${esc(p.display_name || p.name)}</strong>
-          ${p.enabled ? "" : '<span class="tag tag-off">已停用</span>'}
-        </div>
-        <div class="proj-sub">
-          <code>localhost:${p.local_port}</code>
-          <span>→</span><span class="proj-url">${esc(p.server_url)}</span>
-          <span class="tag">${esc(p.cipher)}</span>
-        </div>
-      </div>
-      <div class="proj-actions">
-        <button class="p-toggle ${p.running ? "" : "primary"}">${p.running ? "停止" : "启动"}</button>
-        <button class="p-edit">编辑</button>
-      </div>`;
-    el.querySelector(".p-toggle").addEventListener("click", () => toggleProject(p));
-    el.querySelector(".p-edit").addEventListener("click", () => openEditor(p.name));
-    wrap.appendChild(el);
-  }
+  while (logEntries.length > LOG_CAP) logEntries.shift();
+  renderAllPanels();
 }
 
+// 过滤控件事件：任一变化重渲染两个面板。
+for (const id of [
+  "log-filter", "dash-log-level", "dash-log-search",
+  "full-log-level", "full-log-search",
+]) {
+  $(id).addEventListener("input", renderAllPanels);
+}
+$("btn-clearlog").addEventListener("click", () => { logEntries.length = 0; renderAllPanels(); });
+$("btn-clearlog-full").addEventListener("click", () => { logEntries.length = 0; renderAllPanels(); });
+
+async function openLogDir() {
+  try {
+    await invoke("reveal_log_file");
+  } catch (e) {
+    appendLog("", "error", "打开日志目录失败：" + e);
+  }
+}
+$("btn-open-logdir").addEventListener("click", openLogDir);
+$("btn-open-logdir-2").addEventListener("click", openLogDir);
+
+// ============================================================================
+// 项目表格渲染 + 统计卡
+// ============================================================================
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// ---------- 加载项目列表 ----------
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v : v.toFixed(1)) + " " + units[i];
+}
+
+function stateClass(p) {
+  if (!p.enabled) return "st-off";
+  if (p.state === "错误") return "st-err";
+  if (p.state === "WS 已连接" || p.state === "HTTP 已连接") return "st-conn";
+  if (p.state === "监听中" || p.state === "WS 连接中" || p.state === "HTTP 连接中") return "st-run";
+  return "st-stop";
+}
+
+function stateText(p) {
+  if (!p.enabled) return "已停用";
+  return p.state || (p.running ? "监听中" : "已停止");
+}
+
+function renderProjects() {
+  const tbody = $("project-rows");
+  tbody.innerHTML = "";
+  $("empty-hint").style.display = projects.length ? "none" : "";
+
+  // 更新日志项目过滤器选项
+  const logFilter = $("log-filter");
+  const cur = logFilter.value;
+  logFilter.innerHTML = '<option value="">全部项目</option>';
+  for (const p of projects) {
+    const o = document.createElement("option");
+    o.value = p.name;
+    o.textContent = p.display_name || p.name;
+    logFilter.appendChild(o);
+  }
+  logFilter.value = cur;
+
+  for (const p of projects) {
+    const tr = document.createElement("tr");
+    tr.className = stateClass(p);
+    tr.innerHTML = `
+      <td>
+        <div class="p-name">${esc(p.display_name || p.name)}</div>
+        <div class="p-sub">${esc(p.name)} · ${esc(p.cipher)}</div>
+      </td>
+      <td><code>${p.local_port}</code></td>
+      <td class="p-url" title="${esc(p.server_url)}">${esc(p.server_url)}</td>
+      <td><span class="badge ${stateClass(p)}">${stateText(p)}</span></td>
+      <td class="num">${p.connections}</td>
+      <td class="num">${fmtBytes(p.bytesIn)} / ${fmtBytes(p.bytesOut)}</td>
+      <td class="p-alert">${p.alert ? esc(p.alert) : "—"}</td>
+      <td class="col-actions">
+        <button class="p-toggle ${p.running ? "" : "primary"}" ${p.enabled ? "" : "disabled"}>${p.running ? "停止" : "启动"}</button>
+        <button class="p-health">检查</button>
+        <button class="p-edit">编辑</button>
+        <button class="p-del danger">删除</button>
+      </td>`;
+    tr.querySelector(".p-toggle").addEventListener("click", () => toggleProject(p));
+    tr.querySelector(".p-health").addEventListener("click", () => healthCheck(p));
+    tr.querySelector(".p-edit").addEventListener("click", () => openEditor(p.name));
+    tr.querySelector(".p-del").addEventListener("click", () => deleteProject(p.name));
+    tr.addEventListener("dblclick", (e) => {
+      if (!e.target.closest("button")) openEditor(p.name);
+    });
+    tbody.appendChild(tr);
+  }
+
+  // 统计卡
+  $("st-total").textContent = projects.length;
+  $("st-running").textContent = projects.filter((p) => p.running).length;
+  $("st-conn").textContent = projects.filter(
+    (p) => p.state === "WS 已连接" || p.state === "HTTP 已连接"
+  ).length;
+  $("st-error").textContent = projects.filter((p) => p.state === "错误" || p.alert).length;
+  $("st-down").textContent = fmtBytes(projects.reduce((a, p) => a + p.bytesIn, 0));
+  $("st-up").textContent = fmtBytes(projects.reduce((a, p) => a + p.bytesOut, 0));
+}
+
+// ============================================================================
+// 加载项目列表
+// ============================================================================
 async function refreshProjects() {
   try {
     const r = await invoke("list_projects");
-    projects = r.projects || [];
+    const fresh = r.projects || [];
+    // 保留运行期累计字段（list_projects 不回传连接数/流量/告警）。
+    for (const p of fresh) {
+      const old = projects.find((x) => x.name === p.name);
+      if (old) {
+        p.state = old.state;
+        p.connections = old.connections;
+        p.bytesIn = old.bytesIn;
+        p.bytesOut = old.bytesOut;
+        p.alert = old.alert;
+      }
+    }
+    projects = fresh;
+    for (const p of projects) {
+      p.state = p.state || (p.running ? "监听中" : "已停止");
+      p.connections = p.connections || 0;
+      p.bytesIn = p.bytesIn || 0;
+      p.bytesOut = p.bytesOut || 0;
+      p.alert = p.alert || "";
+    }
     $("config-dir").textContent = r.config_dir || "";
     const errBox = $("cfg-errors");
     if (r.errors && r.errors.length) {
@@ -120,15 +264,20 @@ async function refreshProjects() {
   }
 }
 
-// ---------- 启停 ----------
+// ============================================================================
+// 启停 / 健康检查 / 删除
+// ============================================================================
 async function toggleProject(p) {
   try {
     if (p.running) {
       appendLog(p.name, "info", await invoke("stop_project", { name: p.name }));
       p.running = false;
+      p.state = "已停止";
     } else {
       appendLog(p.name, "info", await invoke("start_project", { name: p.name }));
       p.running = true;
+      p.state = "监听中";
+      p.alert = "";
     }
   } catch (e) {
     appendLog(p.name, "error", String(e));
@@ -136,10 +285,34 @@ async function toggleProject(p) {
   renderProjects();
 }
 
+async function healthCheck(p) {
+  appendLog(p.name, "info", "开始健康检查（真实链路探活）…");
+  try {
+    const report = await invoke("health_check", { name: p.name });
+    const lines = report.split("\n");
+    // 结论行进日志；完整报告进弹窗。
+    appendLog(p.name, lines[0].includes("异常") ? "warn" : "info", "健康检查 " + lines[0]);
+    alert(`健康检查 — ${p.display_name || p.name}\n\n${report}`);
+  } catch (e) {
+    appendLog(p.name, "error", "健康检查失败：" + e);
+  }
+}
+
+async function deleteProject(name) {
+  if (!confirm(`确定删除项目「${name}」？会先停止其隧道。`)) return;
+  try {
+    await invoke("delete_project", { name });
+    appendLog(name, "info", "项目已删除。");
+    await refreshProjects();
+  } catch (e) {
+    appendLog(name, "error", "删除失败：" + e);
+  }
+}
+
 $("btn-start-all").addEventListener("click", async () => {
   for (const p of projects) {
     if (p.enabled && !p.running) {
-      try { await invoke("start_project", { name: p.name }); p.running = true; }
+      try { await invoke("start_project", { name: p.name }); p.running = true; p.state = "监听中"; }
       catch (e) { appendLog(p.name, "error", String(e)); }
     }
   }
@@ -148,13 +321,15 @@ $("btn-start-all").addEventListener("click", async () => {
 });
 $("btn-stop-all").addEventListener("click", async () => {
   try { await invoke("stop_all_projects"); } catch {}
-  for (const p of projects) p.running = false;
+  for (const p of projects) { p.running = false; p.state = "已停止"; p.connections = 0; }
   renderProjects();
   appendLog("", "info", "已停止所有运行中项目。");
 });
 $("btn-refresh").addEventListener("click", refreshProjects);
 
-// ---------- 编辑器 ----------
+// ============================================================================
+// 编辑器
+// ============================================================================
 function openEditor(name) {
   editingName = name;
   showView("editor");
@@ -240,22 +415,18 @@ $("e-save").addEventListener("click", async () => {
 
 $("e-delete").addEventListener("click", async () => {
   if (!editingName) return;
-  if (!confirm(`确定删除项目「${editingName}」？会先停止其隧道。`)) return;
-  try {
-    await invoke("delete_project", { name: editingName });
-    appendLog(editingName, "info", "项目已删除。");
-    editingName = null;
-    await refreshProjects();
-    showView("dashboard");
-  } catch (e) {
-    editorMsg("删除失败：" + e, true);
-  }
+  await deleteProject(editingName);
+  editingName = null;
+  showView("dashboard");
 });
 
-// ---------- 设置 ----------
+// ============================================================================
+// 设置
+// ============================================================================
 async function loadSettings() {
   try { $("autostart").checked = await invoke("get_autostart"); } catch {}
   try { $("config-dir").textContent = await invoke("get_config_dir"); } catch {}
+  try { $("log-dir").textContent = await invoke("get_log_dir"); } catch {}
 }
 $("autostart").addEventListener("change", async (e) => {
   try { await invoke("set_autostart", { enabled: e.target.checked }); }
@@ -273,7 +444,9 @@ $("btn-crypto").addEventListener("click", async () => {
   }
 });
 
-// ---------- 更新 ----------
+// ============================================================================
+// 更新
+// ============================================================================
 function updateMsg(text, isErr) {
   const m = $("update-msg");
   m.style.display = "block";
@@ -306,24 +479,71 @@ $("btn-do-update").addEventListener("click", async () => {
 });
 getVersion().then((v) => { $("cur-version").textContent = "v" + v; }).catch(() => {});
 
-// ---------- 隧道事件 ----------
+// ============================================================================
+// 隧道事件
+// ============================================================================
 await listen("tunnel-event", (ev) => {
-  const { tunnel, kind, message } = ev.payload;
-  if (kind === "bytes") return; // 字节流太密不进日志
-  appendLog(tunnel, kind, kind === "state" ? "状态：" + message : message);
-  if (kind === "state") {
+  const { tunnel, kind, message, dir, n } = ev.payload;
+
+  if (kind === "bytes") {
+    // 字节流不进日志，只做累计统计（对齐 WPF 老版 StatsCollector 语义）。
     const p = projects.find((x) => x.name === tunnel);
-    if (p) {
-      if (message === "已停止" || message === "错误") p.running = false;
-      else if (message.includes("已连接") || message === "监听中") p.running = true;
-      renderProjects();
+    if (p && typeof n === "number") {
+      if (dir === "in") p.bytesIn += n;
+      else if (dir === "out") p.bytesOut += n;
+      throttledRender();
     }
+    return;
+  }
+
+  appendLog(tunnel, kind, kind === "state" ? "状态：" + message : message);
+
+  const p = projects.find((x) => x.name === tunnel);
+  if (!p) return;
+
+  if (kind === "state") {
+    p.state = message;
+    if (message === "已停止" || message === "错误") {
+      p.running = false;
+      if (message === "已停止") p.connections = 0;
+      if (message === "错误") p.alert = "隧道错误";
+    } else {
+      p.running = true;
+      if (message === "WS 已连接" || message === "HTTP 已连接") {
+        p.connections++;
+        p.alert = "";
+      }
+    }
+    renderProjects();
+  } else if (kind === "fatal") {
+    p.alert = message;
+    p.state = "错误";
+    p.running = false;
+    renderProjects();
+  } else if (kind === "error") {
+    p.alert = message;
+    renderProjects();
   }
 });
 
-// ---------- 系统 ----------
+// bytes 事件每帧一条，全量重渲染太贵：限流到每 500ms 一次。
+let renderPending = false;
+function throttledRender() {
+  if (renderPending) return;
+  renderPending = true;
+  setTimeout(() => {
+    renderPending = false;
+    renderProjects();
+  }, 500);
+}
+
+// ============================================================================
+// 系统
+// ============================================================================
 $("btn-hide").addEventListener("click", () => getCurrentWindow().hide());
 
-// ---------- 启动 ----------
+// ============================================================================
+// 启动
+// ============================================================================
 refreshProjects();
 appendLog("", "info", "Cryptunnel 就绪。");

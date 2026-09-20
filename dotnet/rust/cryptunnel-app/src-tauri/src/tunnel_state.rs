@@ -13,6 +13,8 @@ use cryptunnel_tunnel::{
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::file_log::FileLogger;
+
 /// 一条运行中的隧道句柄。
 pub struct TunnelHandle {
     tunnel: std::sync::Arc<Tunnel>,
@@ -23,6 +25,8 @@ pub struct TunnelManager {
     tunnels: Mutex<HashMap<String, TunnelHandle>>,
     /// 最近一次加载出的配置（供状态查询回填展示字段）。
     configs: Mutex<HashMap<String, TunnelConfig>>,
+    /// 会话日志落盘（Option 以兼容初始化失败——日志写不出绝不能拖死隧道）。
+    logger: Mutex<Option<std::sync::Arc<FileLogger>>>,
 }
 
 impl TunnelManager {
@@ -30,7 +34,20 @@ impl TunnelManager {
         TunnelManager {
             tunnels: Mutex::new(HashMap::new()),
             configs: Mutex::new(HashMap::new()),
+            logger: Mutex::new(None),
         }
+    }
+
+    /// 装配文件日志器（应用启动时调用一次；重复调用只保留第一个）。
+    pub fn attach_logger(&self, logger: std::sync::Arc<FileLogger>) {
+        let mut slot = self.logger.lock().unwrap();
+        if slot.is_none() {
+            *slot = Some(logger);
+        }
+    }
+
+    pub fn logger(&self) -> Option<std::sync::Arc<FileLogger>> {
+        self.logger.lock().unwrap().clone()
     }
 
     pub fn is_running(&self, name: &str) -> bool {
@@ -85,11 +102,20 @@ fn default_port() -> u16 {
 }
 
 /// 推给前端的隧道事件载荷（带项目名，便于多隧道区分）。
+///
+/// `bytes` 事件额外带结构化字段 `dir`/`n`，供前端累计流量统计；
+/// `message` 始终保留（旧前端只读 message，向后兼容）。
 #[derive(Debug, Clone, Serialize)]
 pub struct TunnelEventPayload {
     pub tunnel: String,
     pub kind: String,
     pub message: String,
+    /// 仅 kind == "bytes"：`"in"`（服务端→本地）/ `"out"`（本地→服务端）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
+    /// 仅 kind == "bytes"：本次字节数。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub n: Option<u64>,
 }
 
 /// 用给定配置启动一条隧道（按 `cfg.name` 登记）。
@@ -111,24 +137,57 @@ pub fn start_with_config(
     let url = cfg.server_url.clone();
     let cipher = cfg.cipher.clone();
 
-    // 把隧道事件桥到前端（emit "tunnel-event"），载荷带项目名。
+    // 把隧道事件桥到前端（emit "tunnel-event"），载荷带项目名；
+    // 同一份事件也写进滚动文件日志（对齐 .NET 老版 logs/proxy.log）。
     let app_handle = app.clone();
     let name_for_sink = name.clone();
+    let logger_for_sink = mgr.logger();
     let sink: EventSink = std::sync::Arc::new(move |e: TunnelEvent| {
-        let (kind, message) = match &e {
-            TunnelEvent::State(s) => ("state".to_string(), state_text(*s).to_string()),
-            TunnelEvent::Log(level, msg) => (format!("{:?}", level).to_lowercase(), msg.clone()),
-            TunnelEvent::Bytes(dir, n) => {
-                ("bytes".to_string(), format!("{} {} 字节", dir_text(*dir), n))
+        let (kind, message, dir, n) = match &e {
+            TunnelEvent::State(s) => ("state".to_string(), state_text(*s).to_string(), None, None),
+            TunnelEvent::Log(level, msg) => {
+                (format!("{:?}", level).to_lowercase(), msg.clone(), None, None)
             }
-            TunnelEvent::Fatal(m) => ("fatal".to_string(), m.clone()),
+            TunnelEvent::Bytes(d, cnt) => (
+                "bytes".to_string(),
+                format!("{} {} 字节", dir_text(*d), cnt),
+                Some(
+                    match d {
+                        Direction::In => "in",
+                        Direction::Out => "out",
+                    }
+                    .to_string(),
+                ),
+                Some(*cnt as u64),
+            ),
+            TunnelEvent::Fatal(m) => ("fatal".to_string(), m.clone(), None, None),
         };
+        // 落盘：bytes 事件太频繁（每帧一条），只记 state/log/fatal——
+        // 与 .NET 老版行为一致（老版流量走 Stats 计数，不写日志行）。
+        if let Some(logger) = &logger_for_sink {
+            match &e {
+                TunnelEvent::Log(level, msg) => logger.log(*level, Some(&name_for_sink), msg),
+                TunnelEvent::State(s) => logger.log(
+                    cryptunnel_tunnel::LogLevel::Info,
+                    Some(&name_for_sink),
+                    &format!("状态 → {}", state_text(*s)),
+                ),
+                TunnelEvent::Fatal(m) => logger.log(
+                    cryptunnel_tunnel::LogLevel::Error,
+                    Some(&name_for_sink),
+                    m,
+                ),
+                TunnelEvent::Bytes(_, _) => {}
+            }
+        }
         let _ = app_handle.emit(
             "tunnel-event",
             TunnelEventPayload {
                 tunnel: name_for_sink.clone(),
                 kind,
                 message,
+                dir,
+                n,
             },
         );
     });
@@ -153,6 +212,8 @@ pub fn start_with_config(
                     tunnel: name2.clone(),
                     kind: "fatal".into(),
                     message: format!("隧道运行失败：{e}"),
+                    dir: None,
+                    n: None,
                 },
             );
         }
@@ -166,6 +227,8 @@ pub fn start_with_config(
                 tunnel: name2,
                 kind: "state".into(),
                 message: "已停止".into(),
+                dir: None,
+                n: None,
             },
         );
     });

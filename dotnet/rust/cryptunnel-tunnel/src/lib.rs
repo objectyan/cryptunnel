@@ -11,6 +11,7 @@
 //! - [`registry`]：`TunnelCipher` 注册表。
 //! - [`config`]：隧道运行配置。
 //! - [`tunnel`]：网络核心（监听/选路/认证/双向泵），只发 [`tunnel::TunnelEvent`]，不碰 UI。
+//! - [`health`]：手动健康探针（走真实链路验三层，不复用 Tunnel 实例）。
 
 pub mod addr_policy;
 pub mod auth;
@@ -19,6 +20,7 @@ pub mod config;
 pub mod config_loader;
 pub mod error;
 pub mod framing;
+pub mod health;
 pub mod project_config;
 pub mod registry;
 pub mod tunnel;
@@ -26,5 +28,6 @@ pub mod tunnel;
 pub use config::{HttpEndpoint, TransportMode, TunnelConfig, DEFAULT_CIPHER};
 pub use config_loader::{load as load_config_dir, try_read_file, ConfigError, LoadResult};
 pub use error::{TunnelError, TunnelFrameTooLarge};
+pub use health::{probe as health_probe, HealthReport, HealthStage, HealthStatus};
 pub use project_config::{build_project_yaml, ProjectFile};
 pub use tunnel::{Direction, EventSink, LogLevel, Tunnel, TunnelEvent, TunnelState};

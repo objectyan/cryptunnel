@@ -41,12 +41,47 @@
 
         <div id="cfg-errors" class="cfg-errors" style="display:none"></div>
 
-        <div id="project-list" class="project-list">
+        <!-- 统计卡（对齐 WPF 老版主面板） -->
+        <div class="stats">
+          <div class="stat"><div class="stat-num" id="st-total">0</div><div class="stat-label">隧道总数</div></div>
+          <div class="stat stat-ok"><div class="stat-num" id="st-running">0</div><div class="stat-label">运行中</div></div>
+          <div class="stat stat-ok"><div class="stat-num" id="st-conn">0</div><div class="stat-label">已连接</div></div>
+          <div class="stat stat-bad"><div class="stat-num" id="st-error">0</div><div class="stat-label">异常</div></div>
+          <div class="stat stat-traffic"><div class="stat-num"><span id="st-down">0 B</span> <span class="stat-dim">↓</span></div><div class="stat-num"><span id="st-up">0 B</span> <span class="stat-dim">↑</span></div><div class="stat-label">累计流量</div></div>
+        </div>
+
+        <!-- 项目表格 -->
+        <div class="card card-table">
+          <table class="ptable">
+            <thead>
+              <tr>
+                <th>项目</th><th>本地端口</th><th>服务端地址</th><th>状态</th>
+                <th>连接</th><th>流量 ↓ / ↑</th><th>告警</th><th class="col-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody id="project-rows"></tbody>
+          </table>
           <p class="empty" id="empty-hint">暂无项目。点右上角「新建项目」添加第一条隧道。</p>
         </div>
 
+        <!-- 实时日志 -->
         <div class="card">
-          <h2>最近日志</h2>
+          <div class="log-head">
+            <h2>实时日志</h2>
+            <div class="row">
+              <select id="log-filter"><option value="">全部项目</option></select>
+              <select id="dash-log-level">
+                <option value="">全部级别</option>
+                <option value="info">信息</option>
+                <option value="warn">警告</option>
+                <option value="error">错误</option>
+              </select>
+              <input id="dash-log-search" class="log-search" placeholder="正则过滤…" />
+              <label class="check-row"><input type="checkbox" id="dash-log-autoscroll" checked /> 自动滚动</label>
+              <button id="btn-open-logdir" title="在文件管理器中显示 proxy.log">日志目录</button>
+              <button id="btn-clearlog">清空</button>
+            </div>
+          </div>
           <div id="dash-log" class="log log-short"></div>
         </div>
       </section>
@@ -129,8 +164,15 @@
         <header class="view-head">
           <h1>运行日志</h1>
           <div class="row">
-            <select id="log-filter"><option value="">全部项目</option></select>
-            <button id="btn-clearlog">清空</button>
+            <select id="full-log-level">
+              <option value="">全部级别</option>
+              <option value="info">信息</option>
+              <option value="warn">警告</option>
+              <option value="error">错误</option>
+            </select>
+            <input id="full-log-search" class="log-search" placeholder="正则过滤…" />
+            <label class="check-row"><input type="checkbox" id="full-log-autoscroll" checked /> 自动滚动</label>
+            <button id="btn-clearlog-full">清空</button>
           </div>
         </header>
         <div class="card">
@@ -156,6 +198,14 @@
           <h2>配置目录</h2>
           <p class="hint">项目配置（YAML）所在目录，可手动编辑后点主面板「刷新」。</p>
           <code id="config-dir" class="dir"></code>
+        </div>
+        <div class="card">
+          <h2>会话日志</h2>
+          <p class="hint">运行日志滚动写入该目录（proxy.log，与老版同路径、同滚动规则）。</p>
+          <code id="log-dir" class="dir"></code>
+          <div class="row" style="margin-top:10px">
+            <button id="btn-open-logdir-2">打开日志目录</button>
+          </div>
         </div>
         <div class="card">
           <h2>更新</h2>
