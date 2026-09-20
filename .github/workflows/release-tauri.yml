@@ -129,3 +129,90 @@ jobs:
             dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.sig
             dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/deb/*.deb
             dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/deb/*.deb.sig
+
+  # updater 清单 latest.json：tauri-action 只在「它自己持有 releaseId」时生成，
+  # 我们改成 build-only + 手动上传后这条链路断了（v0.1.0 第三次 run 草稿无 latest.json）。
+  # updater 插件已启用（lib.rs 注册 + tauri.conf.json endpoints 指
+  # releases/latest/download/latest.json），缺清单 = 所有客户端自动更新静默失效。
+  # 故在 matrix 全绿后单跑一个 job，读草稿资产里的 .sig 内容，按 tauri-action
+  # upload-version-json.ts 同款结构生成 latest.json 补上。
+  upload-updater-json:
+    needs: release-tauri
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Resolve version from tag
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Generate and upload latest.json
+        run: |
+          set -euo pipefail
+          python3 - "${{ github.repository }}" "${{ github.ref_name }}" "$VERSION"
+          <<'PYEOF'
+          import sys, json, subprocess, datetime
+          repo, tag, ver = sys.argv[1], sys.argv[2], sys.argv[3]
+
+          def gh(*args):
+              r = subprocess.run(['gh', 'api', *args], capture_output=True, text=True)
+              if r.returncode != 0:
+                  raise SystemExit(f'gh api {args} 失败: {r.stderr}')
+              return r.stdout
+
+          rel = json.loads(gh(f'repos/{repo}/releases/tags/{tag}'))
+          assets = {a['name']: a['id'] for a in rel['assets']}
+          print('release assets:', len(assets))
+          for n in sorted(assets):
+              print('  ', n)
+
+          def sig(name):
+              if name not in assets:
+                  return ''
+              return gh(f'repos/{repo}/releases/assets/{assets[name]}',
+                        '-H', 'Accept: application/octet-stream')
+
+          dl = f'https://github.com/{repo}/releases/download/{tag}'
+          entries = {}
+
+          def add(keys, sig_name, url_name):
+              s = sig(sig_name)
+              if not s.strip():
+                  print(f'WARN: 缺签名资产 {sig_name}，跳过 {keys[0]}')
+                  return
+              url = f'{dl}/{url_name}'
+              for k in keys:
+                  entries[k] = {'signature': s, 'url': url}
+
+          # 平台键与 tauri-action upload-version-json.ts 一致：
+          # 主键 {os}-{arch}（Windows 优先 NSIS）+ 细分 {os}-{arch}-{installer}；
+          # macOS universal 同时填 darwin-aarch64 / darwin-x86_64（含 -app 键）。
+          add(['windows-x86_64', 'windows-x86_64-nsis'],
+              f'Cryptunnel_{ver}_x64-setup.exe.sig', f'Cryptunnel_{ver}_x64-setup.exe')
+          add(['windows-x86_64-msi'],
+              f'Cryptunnel_{ver}_x64_en-US.msi.sig', f'Cryptunnel_{ver}_x64_en-US.msi')
+          add(['darwin-aarch64', 'darwin-x86_64', 'darwin-aarch64-app', 'darwin-x86_64-app'],
+              f'Cryptunnel_{ver}_universal.app.tar.gz.sig', f'Cryptunnel_{ver}_universal.app.tar.gz')
+          add(['linux-x86_64', 'linux-x86_64-appimage'],
+              f'Cryptunnel_{ver}_amd64.AppImage.sig', f'Cryptunnel_{ver}_amd64.AppImage')
+          add(['linux-x86_64-deb'],
+              f'Cryptunnel_{ver}_amd64.deb.sig', f'Cryptunnel_{ver}_amd64.deb')
+
+          if not entries:
+              raise SystemExit('latest.json 平台条目为空 —— .sig 资产读取全失败')
+          doc = {
+              'version': ver,
+              'notes': f'Cryptunnel v{ver}',
+              'pub_date': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'platforms': entries,
+          }
+          with open('latest.json', 'w', encoding='utf-8') as f:
+              json.dump(doc, f, indent=2)
+          print(f'latest.json platforms: {len(entries)}')
+
+          subprocess.run(['gh', 'release', 'upload', tag, 'latest.json',
+                          '--clobber', '--repo', repo], check=True)
+          print('latest.json uploaded')
+          PYEOF
+          cat latest.json
