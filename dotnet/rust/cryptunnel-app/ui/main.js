@@ -99,6 +99,13 @@ function fmtBytes(n) {
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
   return (i === 0 ? v : v.toFixed(1)) + " " + u[i];
 }
+// 流量比例条宽度：对齐 .NET BytesToBarWidthConverter
+// w = 64 * (1 - 1/(1+log10(b+1)))，夹在 [3, 64]
+function barWidth(b) {
+  if (!b || b <= 0) return 0;
+  const w = 64 * (1 - 1 / (1 + Math.log10(b + 1)));
+  return Math.max(3, Math.min(64, w));
+}
 
 // ============================================================================
 // 项目表格渲染 + 总览卡
@@ -162,8 +169,8 @@ function renderProjects() {
       </div></td>
       <td class="num">${p.connections}</td>
       <td><div class="tr-cell">
-        <div class="tr-row tr-down"><span class="tr-arrow">↓</span><span class="tr-val">${fmtBytes(p.bytesIn)}</span></div>
-        <div class="tr-row tr-up"><span class="tr-arrow">↑</span><span class="tr-val">${fmtBytes(p.bytesOut)}</span></div>
+        <div class="tr-row tr-down"><span class="tr-arrow">↓</span><span class="tr-val">${fmtBytes(p.bytesIn)}</span><span class="tr-bar" style="width:${barWidth(p.bytesIn)}px"></span></div>
+        <div class="tr-row tr-up"><span class="tr-arrow">↑</span><span class="tr-val">${fmtBytes(p.bytesOut)}</span><span class="tr-bar" style="width:${barWidth(p.bytesOut)}px"></span></div>
       </div></td>
       <td><div class="al-cell">
         <span class="al-badge ${errCls}">${p.errors}</span>
@@ -172,12 +179,10 @@ function renderProjects() {
       <td class="col-actions">
         <button class="p-toggle ${p.running ? "stop" : "start"}" ${p.enabled ? "" : "disabled"}>${p.running ? "停止" : "启动"}</button>
         <button class="p-health" title="健康检查：走真实链路验证网络、加密认证与数据库可达性">检查</button>
-        <button class="p-edit">编辑</button>
         <button class="p-del danger">删除</button>
       </td>`;
     tr.querySelector(".p-toggle").addEventListener("click", () => toggleProject(p));
     tr.querySelector(".p-health").addEventListener("click", () => healthCheck(p));
-    tr.querySelector(".p-edit").addEventListener("click", () => openEditor(p.name));
     tr.querySelector(".p-del").addEventListener("click", () => deleteProject(p.name));
     tr.addEventListener("dblclick", (e) => { if (!e.target.closest("button")) openEditor(p.name); });
     tbody.appendChild(tr);
@@ -194,8 +199,9 @@ function renderProjects() {
   $("st-error").textContent = errors;
   const totalIn = projects.reduce((a, p) => a + p.bytesIn, 0);
   const totalOut = projects.reduce((a, p) => a + p.bytesOut, 0);
+  // 对齐老版：白字单行「↓ x   ↑ y」，箭头不着色
   $("st-traffic").innerHTML =
-    `<span class="t-down">↓ ${fmtBytes(totalIn)}</span> <span class="t-up">↑ ${fmtBytes(totalOut)}</span>`;
+    `<span class="t-down">↓ ${fmtBytes(totalIn)}</span>&nbsp;&nbsp;&nbsp;<span class="t-up">↑ ${fmtBytes(totalOut)}</span>`;
 }
 
 // ============================================================================
@@ -287,22 +293,6 @@ async function deleteProject(name) {
   }
 }
 
-$("btn-start-all").addEventListener("click", async () => {
-  for (const p of projects) {
-    if (p.enabled && !p.running) {
-      try { await invoke("start_project", { name: p.name }); p.running = true; p.state = "监听中"; }
-      catch (e) { appendLog(p.name, "error", String(e)); }
-    }
-  }
-  renderProjects();
-  appendLog("", "info", "已尝试启动所有已启用项目。");
-});
-$("btn-stop-all").addEventListener("click", async () => {
-  try { await invoke("stop_all_projects"); } catch {}
-  for (const p of projects) { p.running = false; p.state = "已停止"; p.connections = 0; }
-  renderProjects();
-  appendLog("", "info", "已停止所有运行中项目。");
-});
 $("btn-refresh").addEventListener("click", refreshProjects);
 
 // 打开目录

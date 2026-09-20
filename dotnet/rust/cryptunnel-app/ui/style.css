@@ -36,12 +36,25 @@ html, body {
   user-select: none;
 }
 
+/* 背景霓虹光球（对齐 WPF：左上蓝 640px opacity .32 / 右下紫 560px opacity .30） */
+.bg-glow { position: fixed; border-radius: 50%; pointer-events: none; z-index: 0; }
+.bg-glow-tl {
+  width: 640px; height: 640px; left: -160px; top: -200px; opacity: 0.32;
+  background: radial-gradient(circle, #4c8dff 0%, rgba(76, 141, 255, 0) 100%);
+}
+.bg-glow-br {
+  width: 560px; height: 560px; right: -180px; bottom: -220px; opacity: 0.30;
+  background: radial-gradient(circle, #7c5cff 0%, rgba(124, 92, 255, 0) 100%);
+}
+
 .win {
   display: flex;
   flex-direction: column;
   height: 100vh;
   gap: 12px;
   padding: 0 16px 16px;
+  position: relative;
+  z-index: 1;
 }
 
 /* ============ 自定义标题栏 ============ */
@@ -86,6 +99,8 @@ html, body {
   border-radius: var(--radius);
   padding: 12px 14px;
   box-shadow: 0 0 14px rgba(0, 0, 0, 0.25);
+  min-width: 0; /* grid 1fr 默认 min-content，窄窗口会挤压内容换行 */
+  overflow: hidden;
 }
 .ov-label { font-size: 11px; color: var(--tx3); }
 .ov-num {
@@ -96,13 +111,15 @@ html, body {
 .ov-accent { color: var(--accent); }
 .ov-success { color: var(--success); }
 .ov-danger { color: var(--danger); }
+/* 累计流量：老版是白字单行「↓ 0   ↑ 0」，箭头不着色 */
 .ov-traffic {
   font-size: 16px; font-weight: 700; font-family: var(--num-font);
   font-variant-numeric: tabular-nums;
-  margin-top: 10px; line-height: 1.1;
+  margin-top: 8px; line-height: 1.1; color: var(--tx1);
+  white-space: nowrap;
 }
-.t-down { color: var(--success); }
-.t-up { color: var(--warn); }
+.t-down { color: inherit; }
+.t-up { color: inherit; }
 .ov-sub { font-size: 11.5px; color: var(--tx2); margin-top: 4px; }
 
 /* ============ 工具栏 ============ */
@@ -138,27 +155,30 @@ button {
   cursor: pointer;
   border-radius: var(--radius-sm);
   border: 1px solid var(--hair);
-  padding: 7px 14px;
+  padding: 7px 12px;
   background: var(--glass);
   color: var(--tx1);
   transition: all 0.15s;
 }
-button:hover { border-color: var(--accent); }
+button:hover { background: var(--glass2); border-color: var(--accent); }
 button:active { transform: translateY(1px); }
+/* 主按钮：老版是紫→蓝渐变 + 蓝色辉光（PrimaryBtn） */
 .btn-primary {
-  background: rgba(76, 141, 255, 0.18);
-  border-color: rgba(76, 141, 255, 0.5);
-  color: #8db4ff;
+  background: linear-gradient(180deg, var(--accent2) 0%, var(--accent) 100%);
+  border-color: var(--accent);
+  color: #fff;
   font-weight: 600;
+  padding: 7px 14px;
+  box-shadow: 0 0 16px rgba(76, 141, 255, 0.55);
 }
-.btn-primary:hover { background: rgba(76, 141, 255, 0.3); border-color: var(--accent); }
-.btn-ghost { background: var(--glass2); }
+.btn-primary:hover { background: var(--accent); }
+.btn-ghost { background: var(--glass); }
 .btn-sm { padding: 4px 10px; font-size: 11.5px; }
 button.danger, .btn-ghost.danger { color: var(--danger); border-color: rgba(255, 93, 108, 0.4); }
 button.danger:hover { background: rgba(255, 93, 108, 0.14); border-color: var(--danger); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* 启停按钮两态 */
+/* 启停按钮两态（对齐 WPF DataTrigger：#29 底 / #66 边） */
 .p-toggle { min-width: 52px; padding: 5px 10px; }
 .p-toggle.start {
   background: rgba(52, 227, 160, 0.16); color: var(--success);
@@ -227,6 +247,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   border-bottom: 1px solid var(--hair-soft);
   vertical-align: middle;
   overflow: hidden;
+  height: 56px; /* 老版 RowHeight=56 */
 }
 .ptable tbody tr { transition: background 0.12s; }
 .ptable tbody tr:hover { background: var(--row-hover); }
@@ -254,15 +275,15 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* 状态列：圆点 + 文本 + 传输/健康副行 */
-.st-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* 状态列：圆点 + 文本 + 传输/健康副行。算法名单行省略号截断（title 悬浮全名），
+   两行折行在 130px 列宽下会溢出 56px 行高边界（自检截图证实）。 */
+.st-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; justify-content: center; }
 .st-row { display: flex; align-items: center; gap: 8px; }
 .st-dot-wrap { position: relative; width: 15px; height: 15px; flex-shrink: 0; }
 .st-dot-glow, .st-dot { position: absolute; border-radius: 50%; }
 .st-dot-glow { inset: 0; opacity: 0.28; }
 .st-dot { inset: 3px; }
 .st-text { font-weight: 600; font-size: 12.5px; white-space: nowrap; }
-/* 传输/算法副行：一行放下，长算法名省略号（title 里有全名） */
 .st-transport {
   font-size: 11px; color: var(--tx3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -276,8 +297,8 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .st-disabled { color: var(--tx3); }
 tr.row-disabled { opacity: 0.55; }
 
-/* 流量列：↓ 绿 / ↑ 橙 双行 */
-.tr-cell { display: flex; flex-direction: column; gap: 3px; }
+/* 流量列：↓ 绿 / ↑ 橙 双行 + 对数比例条（对齐 WPF BytesToBarWidthConverter） */
+.tr-cell { display: flex; flex-direction: column; gap: 4px; justify-content: center; }
 .tr-row {
   display: flex; align-items: center; gap: 5px;
   font-size: 12px; font-family: var(--num-font); font-variant-numeric: tabular-nums;
@@ -287,17 +308,22 @@ tr.row-disabled { opacity: 0.55; }
 .tr-down .tr-arrow { color: var(--success); }
 .tr-up .tr-arrow { color: var(--warn); }
 .tr-val { color: var(--tx2); }
+.tr-bar { height: 4px; border-radius: 2px; margin-left: 6px; }
+.tr-down .tr-bar { background: var(--success); }
+.tr-up .tr-bar { background: var(--warn); }
 
-/* 告警列：错误/警告徽标 */
+/* 告警列：错误/警告徽标（老版圆角 10、无边框、半透明底色，可点击）。
+   注意：徽章是 <span> 不是 <button>，但全局 button:hover 曾命中——
+   用 !important 压住，保证徽章底色不被 hover 玻璃色覆盖。 */
 .al-cell { display: flex; gap: 6px; }
 .al-badge {
-  min-width: 24px; padding: 2px 8px; border-radius: 999px;
-  font-size: 11.5px; font-weight: 700; text-align: center;
-  border: 1px solid transparent; cursor: default;
+  min-width: 26px; padding: 2px 7px; border-radius: 10px;
+  font-size: 12px; font-weight: 600; text-align: center;
+  border: none; cursor: pointer;
 }
-.al-err { background: rgba(255, 93, 108, 0.16); color: var(--danger); border-color: rgba(255, 93, 108, 0.4); }
-.al-warn { background: rgba(255, 178, 46, 0.16); color: var(--warn); border-color: rgba(255, 178, 46, 0.4); }
-.al-zero { background: transparent; color: var(--tx3); border-color: var(--hair-soft); }
+.al-badge.al-err { background: rgba(255, 93, 108, 0.16) !important; color: var(--danger); }
+.al-badge.al-warn { background: rgba(255, 178, 46, 0.16) !important; color: var(--warn); }
+.al-badge.al-zero { background: transparent !important; color: var(--tx3); cursor: default; }
 
 .col-actions { white-space: nowrap; }
 .col-actions button { padding: 5px 8px; font-size: 11.5px; margin-right: 4px; }
@@ -314,13 +340,13 @@ tr.row-disabled { opacity: 0.55; }
 .empty-title { font-size: 22px; font-weight: 600; color: var(--accent); }
 .empty-sub { color: var(--tx2); font-size: 14px; margin-bottom: 14px; }
 
-/* ============ 底部实时日志 ============ */
+/* ============ 底部实时日志（老版固定高 234） ============ */
 .log-panel {
-  height: 220px;
+  height: 234px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  padding: 10px 14px 12px;
+  padding: 8px 14px 10px;
 }
 .log-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -343,8 +369,31 @@ tr.row-disabled { opacity: 0.55; }
 }
 .log-search { width: 190px; caret-color: var(--accent); }
 .log-search:focus, .lf select:focus { outline: none; border-color: var(--accent); }
+/* 开机启动 / 自动滚动开关（对齐 WPF ToggleSwitch：轨道 30x17 + 圆点 13，
+   勾选时轨道变紫蓝渐变 + 辉光，圆点右移变白） */
+.switch-row {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--tx2); cursor: pointer; margin: 0;
+}
+.switch-row input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 30px; height: 17px; border-radius: 9px;
+  background: #39424f; position: relative; cursor: pointer;
+  margin: 0; flex-shrink: 0; transition: background 0.15s;
+}
+.switch-row input[type="checkbox"]::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 13px; height: 13px; border-radius: 50%;
+  background: #cfd6df; transition: all 0.15s;
+}
+.switch-row input[type="checkbox"]:checked {
+  background: linear-gradient(90deg, var(--accent2), var(--accent));
+  box-shadow: 0 0 10px rgba(76, 141, 255, 0.6);
+}
+.switch-row input[type="checkbox"]:checked::after { left: 15px; background: #fff; }
+
 .check-row {
-  display: flex; align-items: center; gap: 5px;
+  display: inline-flex; align-items: center; gap: 5px;
   font-size: 12px; color: var(--tx2); cursor: pointer;
 }
 .check-row input { accent-color: var(--accent); cursor: pointer; }
@@ -412,9 +461,6 @@ tr.row-disabled { opacity: 0.55; }
   font-family: inherit;
 }
 .grid input:focus, .grid select:focus { outline: none; border-color: var(--accent); }
-
-.switch-row { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--tx2); margin-top: 8px; }
-.switch-row input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
 
 .output {
   margin-top: 12px;

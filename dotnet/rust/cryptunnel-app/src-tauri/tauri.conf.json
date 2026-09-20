@@ -11,10 +11,10 @@
       {
         "label": "main",
         "title": "Cryptunnel 隧道客户端",
-        "width": 1024,
-        "height": 700,
-        "minWidth": 860,
-        "minHeight": 560,
+        "width": 1280,
+        "height": 780,
+        "minWidth": 980,
+        "minHeight": 640,
         "resizable": true,
         "decorations": false,
         "visible": true

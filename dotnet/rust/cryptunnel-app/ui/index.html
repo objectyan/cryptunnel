@@ -7,6 +7,10 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <!-- 背景霓虹光球（对齐 WPF MainWindow 根 Grid 的两个 RadialGradient Ellipse） -->
+  <div class="bg-glow bg-glow-tl"></div>
+  <div class="bg-glow bg-glow-br"></div>
+
   <div class="win">
     <!-- 自定义标题栏（对齐 WPF WindowChrome） -->
     <header class="titlebar">
@@ -18,7 +22,7 @@
       <div class="tb-right">
         <button class="tb-btn" id="tb-min" title="最小化">—</button>
         <button class="tb-btn" id="tb-max" title="最大化">▢</button>
-        <button class="tb-btn tb-close" id="tb-close" title="隐藏到托盘">✕</button>
+        <button class="tb-btn tb-close" id="tb-close" title="关闭">✕</button>
       </div>
     </header>
 
@@ -41,7 +45,7 @@
       </div>
       <div class="ov-card">
         <div class="ov-label">累计流量</div>
-        <div class="ov-traffic" id="st-traffic"><span class="t-down">↓ 0</span> <span class="t-up">↑ 0</span></div>
+        <div class="ov-traffic" id="st-traffic"><span class="t-down">↓ 0</span>&nbsp;&nbsp;&nbsp;<span class="t-up">↑ 0</span></div>
         <div class="ov-sub">本次会话</div>
       </div>
     </section>
@@ -58,8 +62,6 @@
       <div class="tb-actions">
         <button id="btn-refresh" class="btn-primary">↻ 重载配置</button>
         <button id="btn-new-project" class="btn-ghost">＋ 新建项目</button>
-        <button id="btn-start-all" class="btn-ghost" title="启动所有已启用项目">全部启动</button>
-        <button id="btn-stop-all" class="btn-ghost" title="停止所有运行中项目">全部停止</button>
         <button id="btn-open-config" class="btn-ghost" title="打开配置目录">配置目录</button>
         <button id="btn-open-logdir" class="btn-ghost" title="打开日志目录">日志目录</button>
         <label class="switch-row tb-autostart"><input type="checkbox" id="autostart" /> 开机启动</label>
@@ -76,9 +78,9 @@
         <!-- fixed 布局的列宽契约：长 URL 不再把「本地端口/连接」等列压成竖排单字；
              状态列要放得下 aes-256-cbc-hmac-sha256（以省略号截断，title 见全名）。 -->
         <colgroup>
-          <col style="width:118px" /><col style="width:70px" /><col />
-          <col style="width:168px" /><col style="width:52px" /><col style="width:112px" />
-          <col style="width:92px" /><col style="width:196px" />
+          <col style="width:160px" /><col style="width:80px" /><col />
+          <col style="width:130px" /><col style="width:60px" /><col style="width:150px" />
+          <col style="width:80px" /><col style="width:170px" />
         </colgroup>
         <thead>
           <tr>
