@@ -79,15 +79,14 @@ cargo tauri build      # 产出 msi / dmg / AppImage / deb
 - 前端「设置 → 更新」可「检查更新」/「下载并安装」，装完自动重启。
 - 新增 command：`check_update` / `download_and_install_update`（另加 `tauri-plugin-process` 用于重启）。
 - **签名密钥（一次性配置，必做）**：公钥已写入 `tauri.conf.json` 的 `plugins.updater.pubkey`；
-  私钥在本机 `~/.tauri/cryptunnel-updater.key`，**须存到仓库 Secrets** `TAURI_SIGNING_PRIVATE_KEY`
-  （明文贴私钥内容；无密码则 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 留空/不设），否则 CI 无法签更新包。
+  私钥在本机 `~/.tauri/cryptunnel-updater.key`（**当前无密码**），**须存到仓库 Secrets** `TAURI_SIGNING_PRIVATE_KEY`，
+  否则 CI 无法签更新包。完整步骤见 [`docs/client-release.md`](../../../docs/client-release.md)。
 
 ## 三平台 CI/发布（#78 已落地）
 
 `.github/workflows/release-tauri.yml`：打 `v*` 标签 → `tauri-action` 三 runner 打包并传 Release 资产
-（Windows exe/msi、macOS dmg、Linux AppImage/deb，含 `.sig` 与 `latest.json`）。与 `.NET/WPF` 的
-`release.yml` 相互独立但都监听 `v*`——**两套不要同时发**，建议后续拆分标签前缀（如 `v*` 给 Tauri、
-`net-v*` 给 .NET）。
+（Windows exe/msi、macOS dmg、Linux AppImage/deb，含 `.sig` 与 `latest.json`，草稿形式）。
+完整发版流程（版本号对齐 / 草稿发布 / 常见坑）见 [`docs/client-release.md`](../../../docs/client-release.md)。
 
 ## 后续里程碑
 

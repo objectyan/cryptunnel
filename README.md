@@ -151,7 +151,8 @@ mvn -Pjakarta clean install
 | `docs/adr/` | 架构决策记录（ADR） |
 | `docs/replacing-the-cipher.md` | 如何替换加密算法（扩展指南） |
 | `docs/decisions/OPEN-DECISIONS.md` | 悬而未决项登记册 |
-| `docs/central-publish.md` | Maven Central 发布流程 |
+| `docs/central-publish.md` | Maven Central 发布流程（Java 服务端） |
+| `docs/client-release.md` | Rust + Tauri 客户端三平台发版流程（含更新签名 secret 配置） |
 | `docs/sunrise-integration.md` | 存量应用接入指引 |
 | `docs/GLOSSARY.md` | 术语表 |
 
