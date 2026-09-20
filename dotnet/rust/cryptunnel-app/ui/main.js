@@ -558,4 +558,5 @@ loadAutostart();
 refreshProjects().then(updateModeText);
 appendLog("", "info", "Cryptunnel 就绪。");
 // 启动自动检查更新（有新版才弹窗，不打断就绪流程）。
-runUpdateFlow(false);
+// 延后 1.5s：错开 App 刚起时系统网络栈/TLS 未就绪的窗口（后端另有 2s/4s 退避重试）。
+setTimeout(() => runUpdateFlow(false), 1500);

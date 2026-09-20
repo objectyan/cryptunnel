@@ -211,26 +211,43 @@ struct UpdateInfo {
 }
 
 /// 检查是否有新版本（不下载）。
+///
+/// 启动自查在 App 刚起 ~1s 发起，此刻系统网络栈/代理/TLS 可能还没就绪，
+/// rustls 握手容易直接失败（"error sending request"），而稍后手动检查却能成功。
+/// 故失败时按 2s/4s 退避重试，掩盖启动瞬间的网络竞争；手动检查同样受益。
 #[tauri::command]
 async fn check_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
     use tauri_plugin_updater::UpdaterExt;
     let current = app.package_info().version.to_string();
     let updater = app.updater().map_err(|e| e.to_string())?;
-    match updater.check().await {
-        Ok(Some(update)) => Ok(UpdateInfo {
-            available: true,
-            current,
-            latest: update.version.clone(),
-            notes: update.body.clone(),
-        }),
-        Ok(None) => Ok(UpdateInfo {
-            available: false,
-            current: current.clone(),
-            latest: current,
-            notes: None,
-        }),
-        Err(e) => Err(format!("检查更新失败：{e}")),
+
+    let mut last_err = String::new();
+    // 最多 3 次：立即、+2s、+4s。
+    for attempt in 0..3u8 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(2 * u64::from(attempt))).await;
+        }
+        match updater.check().await {
+            Ok(Some(update)) => {
+                return Ok(UpdateInfo {
+                    available: true,
+                    current,
+                    latest: update.version.clone(),
+                    notes: update.body.clone(),
+                })
+            }
+            Ok(None) => {
+                return Ok(UpdateInfo {
+                    available: false,
+                    current: current.clone(),
+                    latest: current,
+                    notes: None,
+                })
+            }
+            Err(e) => last_err = e.to_string(),
+        }
     }
+    Err(format!("检查更新失败：{last_err}"))
 }
 
 /// 下载并安装更新，完成后重启应用。

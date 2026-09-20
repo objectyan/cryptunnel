@@ -1,6 +1,6 @@
 [package]
 name = "cryptunnel-crypto"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "Cryptunnel 隧道加密核心（Rust 重写）：AES-CBC-HMAC / AES-GCM / SM4-CBC-HMAC，与 Java/.NET 字节级兼容"
 license = "Apache-2.0"
