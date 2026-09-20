@@ -163,8 +163,7 @@ jobs:
       - name: Generate and upload latest.json
         run: |
           set -euo pipefail
-          python3 - "${{ github.repository }}" "${{ github.ref_name }}" "$VERSION"
-          <<'PYEOF'
+          python3 - "${{ github.repository }}" "${{ github.ref_name }}" "$VERSION" <<'PYEOF'
           import sys, json, subprocess, datetime
           repo, tag, ver = sys.argv[1], sys.argv[2], sys.argv[3]
 
@@ -201,12 +200,13 @@ jobs:
           # 平台键与 tauri-action upload-version-json.ts 一致：
           # 主键 {os}-{arch}（Windows 优先 NSIS）+ 细分 {os}-{arch}-{installer}；
           # macOS universal 同时填 darwin-aarch64 / darwin-x86_64（含 -app 键）。
+          # 资产名以 v0.1.0 实际上传为准：macOS 的 .app.tar.gz 无版本号（Cryptunnel.app.tar.gz）。
           add(['windows-x86_64', 'windows-x86_64-nsis'],
               f'Cryptunnel_{ver}_x64-setup.exe.sig', f'Cryptunnel_{ver}_x64-setup.exe')
           add(['windows-x86_64-msi'],
               f'Cryptunnel_{ver}_x64_en-US.msi.sig', f'Cryptunnel_{ver}_x64_en-US.msi')
           add(['darwin-aarch64', 'darwin-x86_64', 'darwin-aarch64-app', 'darwin-x86_64-app'],
-              f'Cryptunnel_{ver}_universal.app.tar.gz.sig', f'Cryptunnel_{ver}_universal.app.tar.gz')
+              'Cryptunnel.app.tar.gz.sig', 'Cryptunnel.app.tar.gz')
           add(['linux-x86_64', 'linux-x86_64-appimage'],
               f'Cryptunnel_{ver}_amd64.AppImage.sig', f'Cryptunnel_{ver}_amd64.AppImage')
           add(['linux-x86_64-deb'],
