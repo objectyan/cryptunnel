@@ -102,12 +102,37 @@ jobs:
       # 产物真实位置（v0.1.0 第三次 run 实锤，Windows job 日志 "Finished 2 bundles at"）：
       #   cryptunnel-crypto/target/<TARGET-TRIPLE>/release/bundle/<type>/
       # 中间有一层 /<target triple>/ —— 因为 cargo build 传了 --target。
-      # 第二次 run 的 glob 漏了这一层（写成 target/release/bundle/...）→ 12 个
-      # glob 全 "does not match any files"，job 却照样绿、草稿 0 资产（假成功）。
-      # macOS 用 --target universal-apple-darwin 时该层目录名即 matrix.target 本身，
-      # 故统一用 ${{ matrix.target }} 可覆盖三平台。
+      # macOS 用 --target universal-apple-darwin 时该层目录名即 matrix.target 本身。
       #
-      # fail_on_unmatched_files: true —— 再发生 glob 全 miss 直接红，消灭上述假成功。
+      # 用 shell 步骤把本平台的安装包 + .sig 收集到 dist-bundles/：
+      # 不用 action-gh-release 的 files glob 枚举 bundle 类型——三平台共享一份 files
+      # 列表时，每平台必然有枚举项不存在（Windows 上没有 dmg…），开
+      # fail_on_unmatched_files 就会误伤（v0.1.0 第四次 run 三平台全挂于此）。
+      # 这里 nullglob + 计数 == 0 硬失败：本平台一个产物都没有才是真失败。
+      - name: Collect bundles into dist-bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p dist-bundles
+          B="dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle"
+          n=0
+          for f in "$B"/nsis/*.exe "$B"/nsis/*.exe.sig \
+                   "$B"/msi/*.msi "$B"/msi/*.msi.sig \
+                   "$B"/dmg/*.dmg "$B"/dmg/*.dmg.sig \
+                   "$B"/macos/*.app.tar.gz "$B"/macos/*.app.tar.gz.sig \
+                   "$B"/appimage/*.AppImage "$B"/appimage/*.AppImage.sig \
+                   "$B"/deb/*.deb "$B"/deb/*.deb.sig; do
+            cp -v "$f" dist-bundles/
+            n=$((n+1))
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "::error::未收集到任何产物，目录 $B 不存在或为空"
+            ls -la "$B" || true
+            exit 1
+          fi
+          echo "collected $n files"
+
       - name: Upload Release assets
         uses: softprops/action-gh-release@v2
         with:
@@ -116,19 +141,7 @@ jobs:
           draft: true
           prerelease: false
           fail_on_unmatched_files: true
-          files: |
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/nsis/*.exe
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/nsis/*.exe.sig
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/msi/*.msi
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/msi/*.msi.sig
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/dmg/*.dmg.sig
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.sig
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/deb/*.deb
-            dotnet/rust/cryptunnel-crypto/target/${{ matrix.target }}/release/bundle/deb/*.deb.sig
+          files: dist-bundles/*
 
   # updater 清单 latest.json：tauri-action 只在「它自己持有 releaseId」时生成，
   # 我们改成 build-only + 手动上传后这条链路断了（v0.1.0 第三次 run 草稿无 latest.json）。
