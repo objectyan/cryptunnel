@@ -1,7 +1,7 @@
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Manager, WindowEvent, Emitter,
 };
 use tauri_plugin_autostart::MacosLauncher;
 
@@ -28,9 +28,10 @@ fn show_main_window(app: &tauri::AppHandle) {
 /// 构建系统托盘（图标 + 菜单 + 交互）
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "显示主面板", true, None::<&str>)?;
+    let check_upd = MenuItem::with_id(app, "check_update", "检查更新", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &sep, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &check_upd, &sep, &quit])?;
 
     // 托盘图标用 ICO 里的 128×128 PNG 帧，不用 256 的 default_window_icon()：
     // ① from_bytes 解整 ICO 只取第一帧（16×16，任务栏必模糊）；
@@ -52,6 +53,11 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main_window(app),
+            "check_update" => {
+                // 弹出主面板并发事件让前端走更新确认流程（复用启动自查同一条路径）。
+                show_main_window(app);
+                let _ = app.emit("tray-check-update", ());
+            }
             "quit" => {
                 // 真正退出（绕过 close-requested 的隐藏拦截）
                 app.exit(0);
@@ -106,6 +112,9 @@ pub fn run() {
                 file_log::DEFAULT_RETAIN_DAYS,
             ));
             app.state::<TunnelManager>().attach_logger(logger);
+            // 启动时自动拉起所有 enabled=true 的隧道（对齐 .NET 老版「启用即随应用启动」）；
+            // 单个项目失败只写文件日志，不影响应用启动。
+            tunnel_state::autostart_enabled_tunnels(&app.handle(), app.state::<TunnelManager>().inner());
             Ok(())
         })
         // 关窗不退出，只隐藏到托盘（后台常驻）

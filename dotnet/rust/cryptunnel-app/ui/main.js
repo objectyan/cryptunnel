@@ -29,6 +29,60 @@ $("tb-max").addEventListener("click", async () => {
 $("tb-close").addEventListener("click", () => win.hide());
 
 // ============================================================================
+// 自动更新（启动自查 + 标题栏按钮 + 托盘菜单，三处共用同一确认流程）
+// ============================================================================
+let updateBusy = false;
+
+function showUpdateModal(info) {
+  $("update-text").textContent = `当前 v${info.current} → 最新 v${info.latest}`;
+  const notes = (info.notes || "").trim();
+  $("update-notes").textContent = notes;
+  $("update-notes").style.display = notes ? "" : "none";
+  $("update-progress").style.display = "none";
+  $("update-install").style.display = "";
+  $("update-later").style.display = "";
+  $("update-mask").style.display = "flex";
+}
+function hideUpdateModal() { $("update-mask").style.display = "none"; }
+
+async function runUpdateFlow(manual) {
+  if (updateBusy) return;
+  updateBusy = true;
+  try {
+    const info = await invoke("check_update");
+    if (!info.available) {
+      if (manual) appendLog("", "info", `已是最新版本（v${info.current}）。`);
+      return;
+    }
+    appendLog("", "info", `发现新版本 v${info.latest}（当前 v${info.current}）。`);
+    showUpdateModal(info);
+  } catch (e) {
+    if (manual) appendLog("", "warn", `检查更新失败：${e}`);
+  } finally {
+    updateBusy = false;
+  }
+}
+
+$("tb-update").addEventListener("click", () => runUpdateFlow(true));
+$("update-close").addEventListener("click", hideUpdateModal);
+$("update-later").addEventListener("click", hideUpdateModal);
+$("update-install").addEventListener("click", async () => {
+  $("update-install").style.display = "none";
+  $("update-later").style.display = "none";
+  $("update-progress").style.display = "";
+  try {
+    const msg = await invoke("download_and_install_update");
+    appendLog("", "info", msg); // 未重启说明已是最新/无更新
+    hideUpdateModal();
+  } catch (e) {
+    appendLog("", "error", `更新失败：${e}`);
+    hideUpdateModal();
+  }
+});
+// 托盘「检查更新」菜单 → 显示主面板并弹更新确认。
+listen("tray-check-update", () => runUpdateFlow(true));
+
+// ============================================================================
 // 日志（单一面板）
 // ============================================================================
 const LOG_CAP = 1500;
@@ -503,3 +557,5 @@ getVersion().then((v) => { $("cur-version").textContent = "v" + v; }).catch(() =
 loadAutostart();
 refreshProjects().then(updateModeText);
 appendLog("", "info", "Cryptunnel 就绪。");
+// 启动自动检查更新（有新版才弹窗，不打断就绪流程）。
+runUpdateFlow(false);

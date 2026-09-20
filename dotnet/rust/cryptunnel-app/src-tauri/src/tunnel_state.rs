@@ -284,6 +284,30 @@ pub fn resolve_config_dir(app: &AppHandle) -> PathBuf {
         .unwrap_or_else(|| exe_dir.join("config.d"))
 }
 
+/// 启动时自动拉起所有 enabled=true 的隧道（对齐 .NET 老版「启用即随应用启动」）。
+///
+/// 只尝试启动，不把单个项目的失败扩散成启动失败：失败的项仅写文件日志，
+/// 前端随后 list_projects 时会按 running=false 显示，用户可手动重启。
+pub fn autostart_enabled_tunnels(app: &AppHandle, mgr: &TunnelManager) {
+    let config_dir = resolve_config_dir(app);
+    let result = cryptunnel_tunnel::load_config_dir(&config_dir);
+    mgr.set_configs(result.configs.clone());
+    for cfg in result.configs.iter().filter(|c| c.enabled) {
+        if mgr.is_running(&cfg.name) {
+            continue;
+        }
+        if let Err(e) = start_with_config(app, mgr, cfg.clone()) {
+            if let Some(logger) = mgr.logger() {
+                logger.log(
+                    cryptunnel_tunnel::LogLevel::Warn,
+                    Some(&cfg.name),
+                    &format!("自启失败：{e}"),
+                );
+            }
+        }
+    }
+}
+
 /// 项目配置文件路径：`<configDir>/<name>.yaml`。
 pub fn project_file_path(config_dir: &Path, name: &str) -> PathBuf {
     config_dir.join(format!("{name}.yaml"))

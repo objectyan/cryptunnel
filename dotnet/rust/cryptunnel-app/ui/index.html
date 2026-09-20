@@ -20,6 +20,7 @@
         <span class="tb-version" id="cur-version">v…</span>
       </div>
       <div class="tb-right">
+        <button class="tb-btn" id="tb-update" title="检查更新">↻</button>
         <button class="tb-btn" id="tb-min" title="最小化">—</button>
         <button class="tb-btn" id="tb-max" title="最大化">▢</button>
         <button class="tb-btn tb-close" id="tb-close" title="关闭">✕</button>
@@ -173,6 +174,24 @@
           <button class="tb-btn" id="health-close">✕</button>
         </div>
         <div class="modal-body"><pre id="health-report" class="health-report"></pre></div>
+      </div>
+    </div>
+
+    <!-- 更新确认弹窗 -->
+    <div class="modal-mask" id="update-mask" style="display:none">
+      <div class="modal">
+        <div class="modal-head"><span>发现新版本</span>
+          <button class="tb-btn" id="update-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="update-text" class="update-text"></div>
+          <div id="update-notes" class="update-notes"></div>
+          <div class="update-actions">
+            <button class="btn btn-primary" id="update-install">立即更新</button>
+            <button class="btn" id="update-later">稍后</button>
+          </div>
+          <div id="update-progress" class="update-progress" style="display:none">正在下载并安装，完成后将自动重启…</div>
+        </div>
       </div>
     </div>
 

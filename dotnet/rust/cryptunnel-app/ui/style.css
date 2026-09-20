@@ -438,6 +438,15 @@ tr.row-disabled { opacity: 0.55; }
   font-weight: 600; font-size: 14px;
 }
 .modal-body { padding: 16px 18px; overflow-y: auto; }
+
+/* 更新确认弹窗 */
+.update-text { font-size: 14px; margin-bottom: 8px; }
+.update-notes {
+  font-size: 12px; color: var(--tx3); max-height: 120px; overflow-y: auto;
+  white-space: pre-wrap; margin-bottom: 14px; font-family: var(--num-font);
+}
+.update-actions { display: flex; gap: 10px; }
+.update-progress { margin-top: 12px; font-size: 13px; color: var(--accent); }
 .modal-foot {
   display: flex; align-items: center; gap: 8px;
   padding: 12px 18px; border-top: 1px solid var(--hair-soft);
