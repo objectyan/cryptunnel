@@ -173,9 +173,15 @@ jobs:
                   raise SystemExit(f'gh api {args} 失败: {r.stderr}')
               return r.stdout
 
-          rel = json.loads(gh(f'repos/{repo}/releases/tags/{tag}'))
+          rel_list = json.loads(gh(f'repos/{repo}/releases?per_page=100'))
+          rel = next((r for r in rel_list if r['tag_name'] == tag), None)
+          if rel is None:
+              raise SystemExit(f'找不到 tag={tag} 的 release（含草稿）')
+          # by-tag 端点（releases/tags/<tag> 与 gh release view）对草稿返回 404，
+          # 必须按 id 取详情。
+          rel = json.loads(gh(f"repos/{repo}/releases/{rel['id']}"))
           assets = {a['name']: a['id'] for a in rel['assets']}
-          print('release assets:', len(assets))
+          print('release id:', rel['id'], 'draft:', rel['draft'], 'assets:', len(assets))
           for n in sorted(assets):
               print('  ', n)
 
@@ -224,8 +230,13 @@ jobs:
               json.dump(doc, f, indent=2)
           print(f'latest.json platforms: {len(entries)}')
 
-          subprocess.run(['gh', 'release', 'upload', tag, 'latest.json',
-                          '--clobber', '--repo', repo], check=True)
+          if 'latest.json' in assets:
+              gh('-X', 'DELETE', f"repos/{repo}/releases/assets/{assets['latest.json']}")
+              print('deleted existing latest.json')
+          subprocess.run(['gh', 'api', '-X', 'POST',
+                          f"repos/{repo}/releases/{rel['id']}/assets?name=latest.json",
+                          '-H', 'Content-Type: application/json',
+                          '--input', 'latest.json'], check=True)
           print('latest.json uploaded')
           PYEOF
           cat latest.json
