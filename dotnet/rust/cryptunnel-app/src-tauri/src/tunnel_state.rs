@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use cryptunnel_tunnel::{
     Direction, EventSink, Tunnel, TunnelConfig, TunnelEvent, TunnelState,
@@ -241,7 +241,7 @@ pub fn start_with_config(
 /// spike 手动模式：由表单参数构造一个临时配置并启动。
 pub fn start(
     app: &AppHandle,
-    mgr: &Arc<TunnelManager>,
+    mgr: &TunnelManager,
     params: StartParams,
 ) -> Result<String, String> {
     let mut cfg = TunnelConfig {

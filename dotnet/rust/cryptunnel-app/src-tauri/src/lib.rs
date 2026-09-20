@@ -9,11 +9,12 @@ mod tunnel_state;
 mod file_log;
 
 use serde::Serialize;
-use std::sync::Arc;
 use tunnel_state::{StartParams, TunnelManager};
 
-/// Tauri 管理的共享隧道管理器状态。
-type SharedMgr = Arc<TunnelManager>;
+// 注意：`.manage()` 注册的类型必须与所有 `tauri::State<'_, T>` 取用点的类型
+// **完全一致**。曾经注册 `Arc<TunnelManager>` 却按 `TunnelManager` 取用，
+// 编译期不报错，运行到 `state()` 时才 panic（"state() called before manage()"）。
+// TunnelManager 内部全部用 Mutex 管理可变状态，可直接按值注册共享。
 
 /// 显示并聚焦主窗口
 fn show_main_window(app: &tauri::AppHandle) {
@@ -84,8 +85,8 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         // 系统文件管理器/浏览器打开（日志目录）
         .plugin(tauri_plugin_opener::init())
-        // 隧道全局状态（Arc 共享，便于后台任务自持引用）
-        .manage(std::sync::Arc::new(TunnelManager::new()))
+        // 隧道全局状态（按值注册；内部 Mutex 管可变状态，见上方类型一致性注释）
+        .manage(TunnelManager::new())
         .setup(|app| {
             build_tray(app)?;
             // 装配会话日志落盘（对齐 .NET 老版 logs/proxy.log 滚动规则）。
@@ -318,7 +319,7 @@ fn stop_project(mgr: tauri::State<'_, TunnelManager>, name: String) -> Result<St
 
 /// 停止所有运行中的隧道。
 #[tauri::command]
-fn stop_all_projects(mgr: tauri::State<'_, SharedMgr>) -> String {
+fn stop_all_projects(mgr: tauri::State<'_, TunnelManager>) -> String {
     mgr.stop_all();
     "已停止所有运行中的隧道。".into()
 }
@@ -417,7 +418,7 @@ fn save_project(app: tauri::AppHandle, pf: serde_json::Value) -> Result<String, 
 #[tauri::command]
 fn delete_project(
     app: tauri::AppHandle,
-    mgr: tauri::State<'_, SharedMgr>,
+    mgr: tauri::State<'_, TunnelManager>,
     name: String,
 ) -> Result<String, String> {
     mgr.stop(&name);
@@ -437,7 +438,7 @@ fn delete_project(
 #[tauri::command]
 fn start_tunnel(
     app: tauri::AppHandle,
-    mgr: tauri::State<'_, SharedMgr>,
+    mgr: tauri::State<'_, TunnelManager>,
     params: StartParams,
 ) -> Result<String, String> {
     tunnel_state::start(&app, mgr.inner(), params)
@@ -445,7 +446,7 @@ fn start_tunnel(
 
 /// 停止隧道（spike 默认隧道）。
 #[tauri::command]
-fn stop_tunnel(mgr: tauri::State<'_, SharedMgr>) -> Result<String, String> {
+fn stop_tunnel(mgr: tauri::State<'_, TunnelManager>) -> Result<String, String> {
     if !mgr.is_running("default") {
         return Err("隧道未在运行。".to_string());
     }
@@ -455,7 +456,7 @@ fn stop_tunnel(mgr: tauri::State<'_, SharedMgr>) -> Result<String, String> {
 
 /// 查询隧道运行状态（spike 默认隧道）。
 #[tauri::command]
-fn tunnel_status(mgr: tauri::State<'_, SharedMgr>) -> Result<String, String> {
+fn tunnel_status(mgr: tauri::State<'_, TunnelManager>) -> Result<String, String> {
     Ok(if mgr.is_running("default") {
         "running".to_string()
     } else {
