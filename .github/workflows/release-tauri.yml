@@ -233,12 +233,19 @@ jobs:
           if 'latest.json' in assets:
               gh('-X', 'DELETE', f"repos/{repo}/releases/assets/{assets['latest.json']}")
               print('deleted existing latest.json')
-          # 资产上传端点在 uploads.github.com，gh api 默认打 api.github.com（裸 404，
-          # 实测 api.github.com 404 / uploads.github.com 201）。--hostname 切主机。
-          subprocess.run(['gh', 'api', '--hostname', 'uploads.github.com', '-X', 'POST',
-                          f"repos/{repo}/releases/{rel['id']}/assets?name=latest.json",
-                          '-H', 'Content-Type: application/json',
-                          '--input', 'latest.json'], check=True)
+          # 资产上传端点在 uploads.github.com（api.github.com 同路径 404，实测 404 vs 201）。
+          # gh api --hostname 是给 GHE 用的（会拼 api.<host>，实测连 api.uploads.github.com 失败），
+          # 这里直接用 curl 打全 URL，token 取自 GH_TOKEN 环境变量。
+          token = subprocess.run(['printenv', 'GH_TOKEN'], capture_output=True, text=True).stdout.strip()
+          up = subprocess.run([
+              'curl', '-sS', '-f', '-X', 'POST',
+              '-H', f'Authorization: Bearer {token}',
+              '-H', 'Content-Type: application/json',
+              '--data-binary', '@latest.json',
+              f"https://uploads.github.com/repos/{repo}/releases/{rel['id']}/assets?name=latest.json",
+          ], capture_output=True, text=True)
+          if up.returncode != 0:
+              raise SystemExit(f'latest.json 上传失败: {up.stderr[:500]}')
           print('latest.json uploaded')
           PYEOF
           cat latest.json
