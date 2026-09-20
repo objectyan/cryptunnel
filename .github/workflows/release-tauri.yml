@@ -58,10 +58,13 @@ jobs:
         with:
           node-version: 20
 
+      # universal-apple-darwin 不是真实 rust target（rustup 装不了，v0.1.0 macOS 挂在
+      # 「Install Rust」）。它是 tauri build 的 lipo 合并模式：需先装 x86_64 + aarch64
+      # 两个真实 target，再只把 universal 传给 tauri build 的 --target。
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
         with:
-          target: ${{ matrix.target }}
+          target: ${{ matrix.target == 'universal-apple-darwin' && 'x86_64-apple-darwin,aarch64-apple-darwin' || matrix.target }}
 
       # Linux 打包需要 webkit2gtk 等系统依赖（tauri 官方前置要求）
       - name: Install Linux system dependencies
