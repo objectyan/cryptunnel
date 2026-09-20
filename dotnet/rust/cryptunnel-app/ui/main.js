@@ -157,7 +157,7 @@ function renderProjects() {
           </span>
           <span class="st-text" style="color:${st.color}">${st.text}</span>
         </div>
-        <div class="st-transport">${esc(transportOf(p))}</div>
+        <div class="st-transport" title="${esc(transportOf(p))}">${esc(transportOf(p))}</div>
         ${healthRow}
       </div></td>
       <td class="num">${p.connections}</td>

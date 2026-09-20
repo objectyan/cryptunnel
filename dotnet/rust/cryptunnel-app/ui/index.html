@@ -73,6 +73,13 @@
     <!-- 项目表格 -->
     <section class="panel grid-panel">
       <table class="ptable">
+        <!-- fixed 布局的列宽契约：长 URL 不再把「本地端口/连接」等列压成竖排单字；
+             状态列要放得下 aes-256-cbc-hmac-sha256（以省略号截断，title 见全名）。 -->
+        <colgroup>
+          <col style="width:118px" /><col style="width:70px" /><col />
+          <col style="width:168px" /><col style="width:52px" /><col style="width:112px" />
+          <col style="width:92px" /><col style="width:196px" />
+        </colgroup>
         <thead>
           <tr>
             <th class="c-proj">项目</th><th class="c-port">本地端口</th><th class="c-url">服务端地址</th>
