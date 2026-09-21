@@ -209,8 +209,13 @@ jobs:
           # 资产名以 v0.1.0 实际上传为准：macOS 的 .app.tar.gz 无版本号（Cryptunnel.app.tar.gz）。
           add(['windows-x86_64', 'windows-x86_64-nsis'],
               f'Cryptunnel_{ver}_x64-setup.exe.sig', f'Cryptunnel_{ver}_x64-setup.exe')
-          add(['windows-x86_64-msi'],
-              f'Cryptunnel_{ver}_x64_en-US.msi.sig', f'Cryptunnel_{ver}_x64_en-US.msi')
+          # MSI 文件名随 wix.language 区域变化（en-US / zh-CN ...），从实际上传资产动态发现，避免写死断链。
+          msi_names = [n for n in assets if n.lower().endswith('.msi') and 'x64' in n]
+          if msi_names:
+              msi = sorted(msi_names)[0]
+              add(['windows-x86_64-msi'], f'{msi}.sig', msi)
+          else:
+              print('WARN: 未找到 x64 .msi 资产，跳过 windows-x86_64-msi 条目')
           add(['darwin-aarch64', 'darwin-x86_64', 'darwin-aarch64-app', 'darwin-x86_64-app'],
               'Cryptunnel.app.tar.gz.sig', 'Cryptunnel.app.tar.gz')
           add(['linux-x86_64', 'linux-x86_64-appimage'],
