@@ -26,17 +26,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis", "dmg", "app", "appimage", "deb"],
     "icon": [
       "icons/icon.ico",
       "icons/icon.png"
     ],
-    "createUpdaterArtifacts": true,
-    "windows": {
-      "wix": {
-        "language": "zh-CN"
-      }
-    }
+    "createUpdaterArtifacts": true
   },
   "plugins": {
     "updater": {
