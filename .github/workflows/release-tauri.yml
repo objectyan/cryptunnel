@@ -220,9 +220,12 @@ jobs:
 
           if not entries:
               raise SystemExit('latest.json 平台条目为空 —— .sig 资产读取全失败')
+          # notes 优先用发布时填写的说明（中文），没填则用中文兜底，绝不写死英文。
+          body = (rel.get('body') or '').strip()
+          notes = body if body else f'Cryptunnel v{ver} 发布'
           doc = {
               'version': ver,
-              'notes': f'Cryptunnel v{ver}',
+              'notes': notes,
               'pub_date': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'platforms': entries,
           }
