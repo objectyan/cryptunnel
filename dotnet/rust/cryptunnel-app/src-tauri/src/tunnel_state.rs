@@ -317,7 +317,10 @@ pub fn project_file_path(config_dir: &Path, name: &str) -> PathBuf {
 pub fn save_project_file(config_dir: &Path, pf: &cryptunnel_tunnel::ProjectFile) -> Result<PathBuf, String> {
     let name = pf.name.clone().ok_or_else(|| "缺少 name 字段".to_string())?;
     std::fs::create_dir_all(config_dir).map_err(|e| format!("创建配置目录失败：{e}"))?;
-    let path = project_file_path(config_dir, &name);
+    // 覆盖已存在的同名项目：文件名未必等于 name（历史/手工放置的配置），
+    // 按 {name}.yaml 直接写会另起一份，列表里出现两个同名项目。
+    let path = cryptunnel_tunnel::find_project_file(config_dir, &name)
+        .unwrap_or_else(|| project_file_path(config_dir, &name));
     let tmp = config_dir.join(format!(".{name}.yaml.tmp"));
     let yaml = cryptunnel_tunnel::build_project_yaml(pf);
     std::fs::write(&tmp, yaml).map_err(|e| format!("写入失败：{e}"))?;

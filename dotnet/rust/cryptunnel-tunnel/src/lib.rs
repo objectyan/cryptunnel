@@ -27,7 +27,8 @@ pub mod tunnel;
 
 pub use config::{HttpEndpoint, TransportMode, TunnelConfig, DEFAULT_CIPHER};
 pub use config_loader::{
-    load as load_config_dir, try_read_file, validate_project_fields, ConfigError, LoadResult,
+    find_project_file, load as load_config_dir, try_read_file, validate_project_fields, ConfigError,
+    LoadResult,
 };
 pub use error::{TunnelError, TunnelFrameTooLarge};
 pub use health::{probe as health_probe, HealthReport, HealthStage, HealthStatus};

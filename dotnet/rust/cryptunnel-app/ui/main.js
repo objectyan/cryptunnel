@@ -387,22 +387,25 @@ function openEditor(name) {
     $("e-enabled").checked = true; $("e-allownlb").checked = false; $("e-health").checked = false;
     return;
   }
+  // ⚠️ read_project 返回的是 ProjectFile —— Rust 侧带 #[serde(rename_all = "camelCase")]，
+  //    字段必须按 camelCase 读（serverUrl / aesKey / wsPath …）。写成 snake_case 不会报错，
+  //    只会静默得到 undefined，表现为编辑界面「数据不全」。契约由 verify/ui-contract-check.mjs 钉死。
   invoke("read_project", { name }).then((pf) => {
     $("e-name").value = pf.name || name;
     $("e-name").disabled = true;
-    $("e-display").value = pf.display_name || "";
-    $("e-server").value = pf.server_url || "";
+    $("e-display").value = pf.displayName || "";
+    $("e-server").value = pf.serverUrl || "";
     $("e-port").value = (pf.local && pf.local.port) || 3307;
     $("e-address").value = (pf.local && pf.local.address) || "127.0.0.1";
-    $("e-aes").value = pf.aes_key || "";
-    $("e-auth").value = pf.auth_key || "";
-    $("e-target").value = pf.target_id || "";
-    $("e-wspath").value = pf.ws_path || "";
-    $("e-httpbase").value = pf.http_base_path || "";
+    $("e-aes").value = pf.aesKey || "";
+    $("e-auth").value = pf.authKey || "";
+    $("e-target").value = pf.targetId || "";
+    $("e-wspath").value = pf.wsPath || "";
+    $("e-httpbase").value = pf.httpBasePath || "";
     $("e-cipher").value = pf.cipher || "aes-256-cbc-hmac-sha256";
     $("e-mode").value = (pf.transport && pf.transport.mode) || "";
     $("e-enabled").checked = pf.enabled !== false;
-    $("e-allownlb").checked = !!(pf.local && pf.local.allow_non_loopback);
+    $("e-allownlb").checked = !!(pf.local && pf.local.allowNonLoopback);
     $("e-health").checked = !!(pf.health && pf.health.enabled);
   }).catch((e) => editorMsg("读取失败：" + e, true));
 }
@@ -421,26 +424,28 @@ $("e-delete").addEventListener("click", () => { if (editingName) deleteProject(e
 
 $("e-save").addEventListener("click", async () => {
   const name = $("e-name").value.trim();
+  // 同上：save_project 收到的是 serde_json::from_value::<ProjectFile>，键名必须 camelCase，
+  // 否则整个字段被 serde 静默丢弃（落盘配置缺 serverUrl / aesKey，项目下次加载直接报错）。
   const pf = {
-    schema_version: 1, name,
-    display_name: $("e-display").value.trim() || null,
+    schemaVersion: 1, name,
+    displayName: $("e-display").value.trim() || null,
     enabled: $("e-enabled").checked,
-    server_url: $("e-server").value.trim(),
-    aes_key: $("e-aes").value,
-    auth_key: $("e-auth").value,
+    serverUrl: $("e-server").value.trim(),
+    aesKey: $("e-aes").value,
+    authKey: $("e-auth").value,
     cipher: $("e-cipher").value,
-    target_id: $("e-target").value.trim() || null,
-    ws_path: $("e-wspath").value.trim() || null,
-    http_base_path: $("e-httpbase").value.trim() || null,
+    targetId: $("e-target").value.trim() || null,
+    wsPath: $("e-wspath").value.trim() || null,
+    httpBasePath: $("e-httpbase").value.trim() || null,
     local: {
       port: parseInt($("e-port").value, 10),
       address: $("e-address").value.trim() || null,
-      allow_non_loopback: $("e-allownlb").checked,
+      allowNonLoopback: $("e-allownlb").checked,
     },
     transport: { mode: $("e-mode").value || null },
-    health: { enabled: $("e-health").checked, interval_sec: null },
+    health: { enabled: $("e-health").checked, intervalSec: null },
   };
-  if (!name || !pf.server_url || !pf.aes_key || !pf.auth_key) {
+  if (!name || !pf.serverUrl || !pf.aesKey || !pf.authKey) {
     editorMsg("请填完整：name / serverUrl / aesKey / authKey", true);
     return;
   }

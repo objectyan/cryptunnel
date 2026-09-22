@@ -112,6 +112,45 @@ pub fn load(config_dir: &Path) -> LoadResult {
     result
 }
 
+/// 按项目 `name` 在目录里定位它的配置文件。
+///
+/// **为什么不能直接拼 `{name}.yaml`**：文件名不保证等于 `name`。
+/// 手工放置或重命名过的配置（真实案例：`crm-localhost.yaml` 的内容是
+/// `name: crm-local-dev`）同样会被 [`load`] 正常加载并显示在界面上——
+/// 而删除/保存若按文件名猜路径就会错位：
+/// - 删除：`path.exists()` 为假 → 文件一个没删，函数却返回"已删除"，
+///   界面提示成功、刷新后项目复活（用户看到的是"删了没反应"）；
+/// - 保存：另写一份 `{name}.yaml`，目录里出现两个同名项目。
+///
+/// 扫描口径与 [`load`] 保持一致：只认 `*.yaml` / `*.yml`，跳过解析失败的
+/// 文件与纯 defaults 文件（无 `name`）。
+pub fn find_project_file(config_dir: &Path, name: &str) -> Option<PathBuf> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(config_dir) {
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if !p.is_file() {
+                continue;
+            }
+            let ext = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_lowercase());
+            if matches!(ext.as_deref(), Some("yaml") | Some("yml")) {
+                files.push(p);
+            }
+        }
+    }
+    // 与 load 的遍历顺序一致：同名多文件时取文件名序先者，行为可预期。
+    files.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()));
+    files.into_iter().find(|p| {
+        try_parse(p, &mut Vec::new())
+            .and_then(|root| root.name)
+            .as_deref()
+            == Some(name)
+    })
+}
+
 fn file_name(p: &Path) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -459,6 +498,45 @@ local:
         assert_eq!(c.local_port, 3307);
         assert_eq!(c.cipher, DEFAULT_CIPHER);
         assert_eq!(c.http_base_path, "/cryptunnel");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 真实故障复现：`crm-localhost.yaml` 的内容是 `name: crm-local-dev`
+    /// （文件名 ≠ name）。删除/保存若按 `crm-local-dev.yaml` 拼路径必然落空，
+    /// 表现为「删除了但项目还在」与「保存后出现两个同名项目」。
+    #[test]
+    fn finds_project_file_whose_file_name_differs_from_name() {
+        let dir = tmpdir("name-mismatch");
+        write(
+            &dir,
+            "crm-localhost.yaml",
+            GOOD.replace("crm-prod", "crm-local-dev").as_str(),
+        );
+        assert_eq!(
+            find_project_file(&dir, "crm-local-dev"),
+            Some(dir.join("crm-localhost.yaml")),
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_project_file_returns_none_for_unknown_name() {
+        let dir = tmpdir("name-absent");
+        write(&dir, "a.yaml", GOOD);
+        assert_eq!(find_project_file(&dir, "nope"), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 纯 defaults 文件（有 defaults 段、无 name）不能被当成某个项目。
+    #[test]
+    fn find_project_file_skips_defaults_only_file() {
+        let dir = tmpdir("defaults-only");
+        write(
+            &dir,
+            "00-defaults.yaml",
+            "schemaVersion: 1\ndefaults:\n  cipher: aes-256-gcm\n",
+        );
+        assert_eq!(find_project_file(&dir, "crm-prod"), None);
         let _ = fs::remove_dir_all(&dir);
     }
 

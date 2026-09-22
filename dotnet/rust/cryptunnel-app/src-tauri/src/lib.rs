@@ -447,7 +447,15 @@ fn reveal_config_dir(app: tauri::AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn read_project(app: tauri::AppHandle, name: String) -> Result<serde_json::Value, String> {
     let dir = tunnel_state::resolve_config_dir(&app);
-    let path = tunnel_state::project_file_path(&dir, &name);
+    // 文件名未必等于 name（真实案例：crm-localhost.yaml 内容是 `name: crm-local-dev`）。
+    // 按 {name}.yaml 猜路径会读失败 → 编辑器回填全走默认值（"编辑界面数据不全"）。
+    // 与 delete_project/save_project_file 同一口径：find 优先，{name}.yaml 兜底。
+    let path = cryptunnel_tunnel::find_project_file(&dir, &name)
+        .or_else(|| {
+            let p = tunnel_state::project_file_path(&dir, &name);
+            p.exists().then_some(p)
+        })
+        .ok_or_else(|| format!("未找到项目「{name}」的配置文件。"))?;
     let pf = cryptunnel_tunnel::try_read_file(&path)?;
     serde_json::to_value(pf).map_err(|e| e.to_string())
 }
@@ -511,10 +519,17 @@ fn delete_project(
 ) -> Result<String, String> {
     mgr.stop(&name);
     let dir = tunnel_state::resolve_config_dir(&app);
-    let path = tunnel_state::project_file_path(&dir, &name);
-    if path.exists() {
-        std::fs::remove_file(&path).map_err(|e| format!("删除失败：{e}"))?;
-    }
+    // 不能按 {name}.yaml 猜路径：文件名未必等于 name（真实案例：crm-localhost.yaml
+    // 的内容是 `name: crm-local-dev`）。猜错时旧实现会跳过删除却照样返回成功，
+    // 界面提示"已删除"、刷新后项目复活。
+    let path = cryptunnel_tunnel::find_project_file(&dir, &name)
+        .or_else(|| {
+            // 兜底：YAML 解析失败（name 读不出）但文件名恰好等于 {name}.yaml
+            let p = tunnel_state::project_file_path(&dir, &name);
+            p.exists().then_some(p)
+        })
+        .ok_or_else(|| format!("未找到项目「{name}」的配置文件。"))?;
+    std::fs::remove_file(&path).map_err(|e| format!("删除失败：{e}"))?;
     Ok(format!("已删除项目「{name}」。"))
 }
 
