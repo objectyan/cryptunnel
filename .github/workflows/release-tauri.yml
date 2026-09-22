@@ -3,9 +3,11 @@
 # 用法（版本号以 tauri.conf.json / Cargo.toml 为准，标签须与之对应）：
 #   git tag v0.2.0
 #   git push origin v0.2.0
+# 打标签后全自动：三平台构建 → 传资产 → 生成 latest.json → 自动转正式发布（成为 latest）。
+# 无需再到 Releases 页手动点 Publish。
 #
 # 产物（按平台，传到 Release 资产）：
-#   Windows:  Cryptunnel_<ver>_x64-setup.exe / .msi  (+ .sig 更新签名)
+#   Windows:  Cryptunnel_<ver>_x64-setup.exe  (+ .sig 更新签名)
 #   macOS:    Cryptunnel_<ver>_universal.dmg / .app.tar.gz (+ .sig)
 #   Linux:    Cryptunnel_<ver>_amd64.AppImage / .deb (+ .sig)
 #   latest.json                                   更新清单（tauri-plugin-updater 据此找最新版）
@@ -257,3 +259,34 @@ jobs:
           print('latest.json uploaded')
           PYEOF
           cat latest.json
+
+  # 构建 + latest.json 全部就位后，自动把草稿转正式发布（draft=false）→ 成为 latest。
+  # 保留草稿阶段是为了原子性：构建期与 latest.json 上传期不对外暴露，
+  # 等一切就绪再发布，避免 updater 撞上「已发布但 latest.json 还没传上去」的 404 窗口。
+  # GitHub 规定草稿不算 latest（releases/latest/... 不指向草稿），故必须有这一步。
+  publish-release:
+    needs: upload-updater-json
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Publish draft release as latest
+        run: |
+          set -euo pipefail
+          # 草稿不能按 tag 查（by-tag 对该 release 404），列出后按 tag_name 匹配。
+          REL_ID=$(gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id")
+          if [ -z "$REL_ID" ]; then
+            echo "::error::找不到 tag=$GITHUB_REF_NAME 的 release"
+            exit 1
+          fi
+          # 发布前确认 latest.json 已在资产里，否则发布后 updater 会短暂 404。
+          HAS_JSON=$(gh api "repos/${{ github.repository }}/releases/$REL_ID/assets" \
+            --jq '[.[] | select(.name == "latest.json")] | length')
+          if [ "$HAS_JSON" -eq 0 ]; then
+            echo "::error::latest.json 未上传，拒绝发布"
+            exit 1
+          fi
+          gh api -X PATCH "repos/${{ github.repository }}/releases/$REL_ID" \
+            -F draft=false -F prerelease=false > /dev/null
+          echo "已发布 $GITHUB_REF_NAME（draft=false），现为 latest release"
