@@ -87,10 +87,11 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
         }))
-        // 开机自启
+        // 开机自启：追加 --autostart 参数，供 setup 判断「本次是被开机自启拉起的」，
+        // 从而只驻留托盘、不弹主窗口（对齐 .NET 老版静默启动行为）。
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
-            Some(vec![]),
+            Some(vec!["--autostart"]),
         ))
         // 系统通知
         .plugin(tauri_plugin_notification::init())
@@ -103,6 +104,13 @@ pub fn run() {
         .manage(TunnelManager::new())
         .setup(|app| {
             build_tray(app)?;
+            // 主窗口默认隐藏（tauri.conf.json visible=false），此处按启动来源决定是否显示：
+            // 开机自启（带 --autostart）→ 仅驻留托盘静默启动；手动启动 → 显示主面板。
+            // 这样自启时不会突然弹窗（老版 .NET 客户端同款行为）。
+            let launched_by_autostart = std::env::args().any(|a| a == "--autostart");
+            if !launched_by_autostart {
+                show_main_window(&app.handle());
+            }
             // 装配会话日志落盘（对齐 .NET 老版 logs/proxy.log 滚动规则）。
             // 目录解析失败/无权限时 logger 仍然可用（写时吞错），绝不影响启动。
             let log_dir = file_log::resolve_log_dir(&app.handle());
