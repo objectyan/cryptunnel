@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "tray-menu",
+  "description": "自绘托盘菜单窗口：只需事件监听（core:default 已含 event:default），动作由 Rust 命令执行，按最小权限不授予 updater/autostart 等。",
+  "windows": ["tray-menu"],
+  "permissions": ["core:default"]
+}

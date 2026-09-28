@@ -1,7 +1,6 @@
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent, Emitter,
+    Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_autostart::MacosLauncher;
 
@@ -25,14 +24,61 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
-/// 构建系统托盘（图标 + 菜单 + 交互）
-fn build_tray(app: &tauri::App) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "显示主面板", true, None::<&str>)?;
-    let check_upd = MenuItem::with_id(app, "check_update", "检查更新", true, None::<&str>)?;
-    let sep = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &check_upd, &sep, &quit])?;
+/// 主窗口是否可见（托盘菜单「显示主面板 / 隐藏主面板」的文案依据）。
+fn main_window_visible(app: &tauri::AppHandle) -> bool {
+    app.get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
+}
 
+/// 切换主面板显示/隐藏（托盘菜单第一项）。
+fn toggle_main_window(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        if win.is_visible().unwrap_or(false) {
+            let _ = win.hide();
+        } else {
+            show_main_window(app);
+        }
+    }
+}
+
+/// 在光标处弹出自绘托盘菜单窗口。
+///
+/// 不用系统原生菜单的原因：Windows 原生托盘菜单由系统绘制，样式无法与
+/// 应用的深色自绘界面统一（跟随系统主题，浅色系统下是一块白底菜单）。
+/// 自绘方案：无边框透明窗口 + 前端用同一套设计 token 渲染。
+fn show_tray_menu(app: &tauri::AppHandle, cursor: tauri::PhysicalPosition<f64>) {
+    let Some(win) = app.get_webview_window("tray-menu") else {
+        return;
+    };
+    // 菜单尺寸须与 tauri.conf.json 中 tray-menu 窗口的 width/height 保持一致。
+    const W: f64 = 176.0;
+    const H: f64 = 136.0;
+    // 默认把菜单摆在光标左上方（贴近屏幕右下角任务栏时的弹出方向）。
+    let mut x = cursor.x - W;
+    let mut y = cursor.y - H;
+    // 夹到光标所在显示器范围内，避免多屏/贴边时跑出屏幕。
+    if let Ok(Some(mon)) = app.monitor_from_point(cursor.x, cursor.y) {
+        let pos = mon.position();
+        let size = mon.size();
+        let (mx, my) = (pos.x as f64, pos.y as f64);
+        let max_x = (mx + size.width as f64 - W).max(mx);
+        let max_y = (my + size.height as f64 - H).max(my);
+        x = x.clamp(mx, max_x);
+        y = y.clamp(my, max_y);
+    } else {
+        x = x.max(0.0);
+        y = y.max(0.0);
+    }
+    let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+    let _ = win.show();
+    let _ = win.set_focus();
+    // 通知菜单窗口刷新「显示/隐藏主面板」文案（首帧可能早于监听注册，前端另有 focus 兜底）。
+    let _ = app.emit_to("tray-menu", "tray-menu-show", main_window_visible(app));
+}
+
+/// 构建系统托盘（图标 + 交互；菜单为自绘窗口，见 show_tray_menu）
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     // 托盘图标用 ICO 里的 128×128 PNG 帧，不用 256 的 default_window_icon()：
     // ① from_bytes 解整 ICO 只取第一帧（16×16，任务栏必模糊）；
     // ② 直接用 256 PNG 缩到 ~16-32px 同样发白失真。
@@ -49,34 +95,53 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let _tray = TrayIconBuilder::with_id("cryptunnel-tray")
         .icon(icon)
         .tooltip("Cryptunnel 隧道客户端")
-        .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => show_main_window(app),
-            "check_update" => {
-                // 弹出主面板并发事件让前端走更新确认流程（复用启动自查同一条路径）。
-                show_main_window(app);
-                let _ = app.emit("tray-check-update", ());
-            }
-            "quit" => {
-                // 真正退出（绕过 close-requested 的隐藏拦截）
-                app.exit(0);
-            }
-            _ => {}
-        })
         .on_tray_icon_event(|tray, event| {
-            // 左键点击托盘图标 → 显示主面板
             if let TrayIconEvent::Click {
-                button: MouseButton::Left,
+                button,
                 button_state: MouseButtonState::Up,
+                position,
                 ..
             } = event
             {
-                show_main_window(tray.app_handle());
+                match button {
+                    // 左键点击托盘图标 → 显示主面板
+                    MouseButton::Left => show_main_window(tray.app_handle()),
+                    // 右键 → 在光标处弹出自绘菜单
+                    MouseButton::Right => show_tray_menu(tray.app_handle(), position),
+                    _ => {}
+                }
             }
         })
         .build(app)?;
 
+    Ok(())
+}
+
+/// 自绘托盘菜单当前应显示的主面板文案状态（true = 已显示 → 菜单项应为「隐藏主面板」）。
+#[tauri::command]
+fn tray_menu_state(app: tauri::AppHandle) -> bool {
+    main_window_visible(&app)
+}
+
+/// 自绘托盘菜单的动作入口；执行前先收起菜单窗口。
+#[tauri::command]
+fn tray_menu_action(app: tauri::AppHandle, action: String) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("tray-menu") {
+        let _ = win.hide();
+    }
+    match action.as_str() {
+        "toggle_main" => toggle_main_window(&app),
+        "check_update" => {
+            // 复用启动自查同一条更新流程：显示主面板 + 通知前端拉更新
+            show_main_window(&app);
+            let _ = app.emit("tray-check-update", ());
+        }
+        "quit" => app.exit(0),
+        // 仅收起菜单（Esc）
+        "hide" => {}
+        other => return Err(format!("未知的托盘菜单动作：{other}")),
+    }
     Ok(())
 }
 
@@ -126,17 +191,26 @@ pub fn run() {
             Ok(())
         })
         // 关窗不退出，只隐藏到托盘（后台常驻）
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 if window.label() == "main" {
                     let _ = window.hide();
                     api.prevent_close();
                 }
             }
+            // 自绘托盘菜单：失焦即收起（等价于系统菜单点击外部关闭）
+            WindowEvent::Focused(false) => {
+                if window.label() == "tray-menu" {
+                    let _ = window.hide();
+                }
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             greet,
             crypto_self_check,
+            tray_menu_state,
+            tray_menu_action,
             set_autostart,
             get_autostart,
             check_update,

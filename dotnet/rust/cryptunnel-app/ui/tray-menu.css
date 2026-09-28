@@ -1,0 +1,47 @@
+/* 自绘托盘菜单样式。
+   窗口本身透明（tauri.conf.json transparent:true），只有面板有底色与圆角，
+   颜色/圆角/字体全部走 style.css 的 token，与主面板保持同一视觉语言。 */
+
+/* 覆盖 style.css 的整屏渐变：透明窗口处要透出桌面，不能铺满背景 */
+html, body {
+  background: transparent;
+  padding: 0;
+}
+
+/* margin 给外阴影留出透明边距（窗口比面板大一圈） */
+.tray-menu {
+  margin: 6px;
+  padding: 5px;
+  background: rgba(16, 21, 34, 0.97);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+}
+
+.tray-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tx1);
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 13px;
+  text-align: left;
+  cursor: default;
+}
+
+.tray-item:hover { background: var(--glass2); }
+.tray-item:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+.tray-danger { color: var(--danger); }
+
+.tray-sep {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--hair);
+}

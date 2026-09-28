@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Cryptunnel 托盘菜单</title>
+  <!-- 复用主界面设计 token（:root 变量与字体），保证与主面板风格完全一致 -->
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="tray-menu.css" />
+</head>
+<body>
+  <div class="tray-menu" role="menu">
+    <button class="tray-item" role="menuitem" id="tm-toggle" data-action="toggle_main">显示主面板</button>
+    <button class="tray-item" role="menuitem" data-action="check_update">检查更新</button>
+    <div class="tray-sep" role="separator"></div>
+    <button class="tray-item tray-danger" role="menuitem" data-action="quit">退出</button>
+  </div>
+  <script type="module" src="tray-menu.js"></script>
+</body>
+</html>
