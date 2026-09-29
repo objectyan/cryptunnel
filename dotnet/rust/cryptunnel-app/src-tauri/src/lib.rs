@@ -42,6 +42,46 @@ fn toggle_main_window(app: &tauri::AppHandle) {
     }
 }
 
+/// 托盘菜单窗口的**逻辑**尺寸，须与 tauri.conf.json 中 tray-menu 窗口一致。
+/// 仅用作拿不到窗口外框时的兜底（拿得到时必须用真实物理外框，见 show_tray_menu）。
+const TRAY_MENU_LOGICAL_W: f64 = 176.0;
+const TRAY_MENU_LOGICAL_H: f64 = 136.0;
+
+/// 计算托盘菜单窗口左上角应放置的坐标（**物理像素**）。
+///
+/// - `cursor`：触发右键的鼠标物理坐标；
+/// - `win`：菜单窗口的物理外框尺寸；
+/// - `monitor`：光标所在显示器的 `(物理原点, 物理尺寸)`，取不到时传 `None`。
+///
+/// 默认把菜单摆在光标**左上方**（托盘图标在屏幕右下角，向上向左展开）；
+/// 再夹到显示器范围内，避免贴边/多屏时弹到屏幕外。
+///
+/// 抽成纯函数的原因：常规情况下的错误（差几十像素、贴边越界）肉眼很难发现，
+/// 而这里**必须**用同一量纲的坐标——光标是物理像素，配置里的窗口尺寸是逻辑像素，
+/// 在 125%/150% 缩放的屏幕上混用会直接把菜单推出屏幕（见下方单测）。
+fn tray_menu_origin(
+    cursor: (f64, f64),
+    win: (f64, f64),
+    monitor: Option<((f64, f64), (f64, f64))>,
+) -> (f64, f64) {
+    let mut x = cursor.0 - win.0;
+    let mut y = cursor.1 - win.1;
+    match monitor {
+        Some(((mx, my), (mw, mh))) => {
+            // .max(mx)/.max(my) 保证显示器比菜单还小时下界不反超上界（否则 clamp panic）。
+            let max_x = (mx + mw - win.0).max(mx);
+            let max_y = (my + mh - win.1).max(my);
+            x = x.clamp(mx, max_x);
+            y = y.clamp(my, max_y);
+        }
+        None => {
+            x = x.max(0.0);
+            y = y.max(0.0);
+        }
+    }
+    (x, y)
+}
+
 /// 在光标处弹出自绘托盘菜单窗口。
 ///
 /// 不用系统原生菜单的原因：Windows 原生托盘菜单由系统绘制，样式无法与
@@ -51,25 +91,33 @@ fn show_tray_menu(app: &tauri::AppHandle, cursor: tauri::PhysicalPosition<f64>) 
     let Some(win) = app.get_webview_window("tray-menu") else {
         return;
     };
-    // 菜单尺寸须与 tauri.conf.json 中 tray-menu 窗口的 width/height 保持一致。
-    const W: f64 = 176.0;
-    const H: f64 = 136.0;
-    // 默认把菜单摆在光标左上方（贴近屏幕右下角任务栏时的弹出方向）。
-    let mut x = cursor.x - W;
-    let mut y = cursor.y - H;
-    // 夹到光标所在显示器范围内，避免多屏/贴边时跑出屏幕。
-    if let Ok(Some(mon)) = app.monitor_from_point(cursor.x, cursor.y) {
-        let pos = mon.position();
-        let size = mon.size();
-        let (mx, my) = (pos.x as f64, pos.y as f64);
-        let max_x = (mx + size.width as f64 - W).max(mx);
-        let max_y = (my + size.height as f64 - H).max(my);
-        x = x.clamp(mx, max_x);
-        y = y.clamp(my, max_y);
-    } else {
-        x = x.max(0.0);
-        y = y.max(0.0);
-    }
+    // ⚠ 必须用窗口的**物理**外框尺寸，不能直接用配置里的 176×136：
+    // 配置值是逻辑像素，而光标坐标与 monitor_from_point 都是物理像素。
+    // 125% 缩放下 176 逻辑 = 220 物理，混用会让菜单右/下边缘越过光标 44px，
+    // 贴右下角时还会被 clamp 顶到屏幕外。
+    let win_size = win
+        .outer_size()
+        .map(|s| (f64::from(s.width), f64::from(s.height)))
+        .unwrap_or_else(|_| {
+            let scale = win.scale_factor().unwrap_or(1.0);
+            (
+                TRAY_MENU_LOGICAL_W * scale,
+                TRAY_MENU_LOGICAL_H * scale,
+            )
+        });
+    let monitor = app
+        .monitor_from_point(cursor.x, cursor.y)
+        .ok()
+        .flatten()
+        .map(|m| {
+            let p = m.position();
+            let s = m.size();
+            (
+                (f64::from(p.x), f64::from(p.y)),
+                (f64::from(s.width), f64::from(s.height)),
+            )
+        });
+    let (x, y) = tray_menu_origin((cursor.x, cursor.y), win_size, monitor);
     let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
     let _ = win.show();
     let _ = win.set_focus();
@@ -647,4 +695,84 @@ fn tunnel_status(mgr: tauri::State<'_, TunnelManager>) -> Result<String, String>
     } else {
         "stopped".to_string()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tray_menu_origin;
+
+    /// 常规：菜单贴光标左上方展开（托盘在右下角，向上向左弹）。
+    #[test]
+    fn origin_sits_left_above_cursor() {
+        let p = tray_menu_origin(
+            (1000.0, 800.0),
+            (176.0, 136.0),
+            Some(((0.0, 0.0), (2048.0, 1280.0))),
+        );
+        assert_eq!(p, (824.0, 664.0));
+    }
+
+    /// 真实场景（本机 2560×1600 @125%）：光标在右下角托盘中点的下方，
+    /// 菜单 220×170 物理像素必须**完整落在屏内**。
+    /// 若误把配置里的逻辑值 176×136 当物理尺寸用，x 会算成 2540-176=2364，
+    /// 右边缘 2364+220=2584 > 2560 → 菜单右侧被切掉 24px。
+    #[test]
+    fn origin_fits_on_screen_at_dpi_125() {
+        let win = (220.0, 170.0);
+        let mon = ((0.0, 0.0), (2560.0, 1600.0));
+        let (x, y) = tray_menu_origin((2540.0, 1580.0), win, Some(mon));
+        assert!(
+            x + win.0 <= mon.1 .0 && y + win.1 <= mon.1 .1,
+            "菜单越出屏幕：({x},{y}) + {win:?} > {mon:?}"
+        );
+        assert_eq!((x, y), (2320.0, 1410.0));
+
+        // 变异对照：把逻辑尺寸 176×136 当物理尺寸传进去（show_tray_menu 修前的写法），
+        // 菜单右边缘必然越界 —— 用这条反向断言证明上面那条「屏内」断言不是摆设。
+        let (bad_x, _) = tray_menu_origin((2540.0, 1580.0), (176.0, 136.0), Some(mon));
+        assert!(
+            bad_x + win.0 > mon.1 .0,
+            "用逻辑尺寸摆放本应越界，否则该断言无意义：bad_x={bad_x}"
+        );
+    }
+
+    /// 光标落在显示器右/下边界之外时，clamp 到能完整放下菜单的位置。
+    #[test]
+    fn origin_clamps_when_cursor_beyond_monitor_edge() {
+        let p = tray_menu_origin(
+            (2400.0, 1400.0),
+            (176.0, 136.0),
+            Some(((0.0, 0.0), (2048.0, 1280.0))),
+        );
+        assert_eq!(p, (1872.0, 1144.0));
+    }
+
+    /// 左侧副屏物理原点是负值：不能把 x/y 简单 max(0) 掉，否则菜单会跑到主屏左上角。
+    #[test]
+    fn origin_supports_negative_secondary_monitor() {
+        let p = tray_menu_origin(
+            (-1900.0, 1000.0),
+            (176.0, 136.0),
+            Some(((-1920.0, 0.0), (1920.0, 1080.0))),
+        );
+        assert_eq!(p, (-1920.0, 864.0));
+    }
+
+    /// 取不到显示器信息时退化为「不越出屏幕原点」。
+    #[test]
+    fn origin_falls_back_to_origin_without_monitor() {
+        let p = tray_menu_origin((10.0, 10.0), (176.0, 136.0), None);
+        assert_eq!(p, (0.0, 0.0));
+    }
+
+    /// 显示器比菜单还小：下界不得反超上界（否则 f64::clamp panic）。
+    #[test]
+    fn origin_does_not_panic_on_tiny_monitor() {
+        let p = tray_menu_origin(
+            (100.0, 100.0),
+            (176.0, 136.0),
+            Some(((0.0, 0.0), (100.0, 100.0))),
+        );
+        assert_eq!(p, (0.0, 0.0));
+    }
 }
