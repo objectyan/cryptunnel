@@ -1,0 +1,152 @@
+# Java 服务端（cryptunnel-parent + core + starter-common/javax/jakarta）Maven Central 发布流水线。
+#
+# 用法（版本号以 java/pom.xml 的 <version> 为准，标签须与之对应）：
+#     git tag java-v1.1.0
+#     git push origin java-v1.1.0
+# 打标签后全自动：版本/重发预检 -> javax 发布（JDK8，parent+core+common+javax）
+#              -> jakarta 发布（JDK17，仅 starter-jakarta）-> Central 自动转正式版。
+# 无需再到 Central Portal 手动点 Publish（pom 已配 autoPublish=true）。
+#
+# ⚠️ tag 前缀必须是 java-v*：release-tauri.yml 监听的是 v*（Tauri 客户端发布），
+#    两套若共用 v* 会同时触发，互相踩踏（该 workflow 头部注释有历史警告）。
+#
+# 与本地手动发布（java/release.sh）逐条对齐：
+#   - jakarta 那步必须带 -pl cryptunnel-starter-jakarta，否则会重发已发布的
+#     parent/core/common，触发 Central "already exists" FAILED（项目踩过，ef0afd1d）
+#   - Central 的 deployment bundle 原子：同版本不可重发 -> guard 先查 repo1，已存在直接失败
+#   - javax 与 jakarta 永远同版本号，两步都从同一个 tag 版本取，天然一致
+#
+# 需要的 GitHub Secrets（Settings -> Secrets and variables -> Actions）：
+#   CENTRAL_USERNAME  Central Portal User Token 用户名（与本地 ~/.m2/settings.xml <id>central</id> 同一对）
+#   CENTRAL_PASSWORD  对应用户 Token 密码
+#   GPG_PRIVATE_KEY   签名私钥 armored 全文：gpg --armor --export-secret-keys 880A1A81030EA764109E2BAC7D055743CE30D5EF（导出文件用完删掉）
+#   GPG_PASSPHRASE    该私钥的密码（= 本地 settings.xml <id>gpg</id> 的密码）
+
+name: Release Maven
+
+on:
+  push:
+    tags:
+      - 'java-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '要发布的版本号（须等于 java/pom.xml 的 <version>，如 1.1.0）'
+        required: true
+
+permissions:
+  contents: read
+
+# 同一 tag 重复推送时排队而不是并发；发布流程不取消
+concurrency:
+  group: release-maven-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: 预检（版本一致性 + 重发检查）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析目标版本
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#java-v}"
+          fi
+          if ! echo "$V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'; then
+            echo "::error::版本号格式不对: '$V'（tag 应形如 java-v1.1.0）"
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "目标版本: $V"
+
+      - name: 校验 pom 版本与 tag 一致
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          # 与 release.sh 同一口径：java/pom.xml 第一个 <version> 即 project.version（根 POM 无 <parent> 块）
+          POM_V="$(grep -m1 '<version>' java/pom.xml | sed -E 's/.*<version>([0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?)<\/version>.*/\1/')"
+          echo "pom 版本: ${POM_V:-?}  tag 版本: $V"
+          if [ -z "$POM_V" ]; then
+            echo "::error::没能从 java/pom.xml 解析出版本号"
+            exit 1
+          fi
+          if [ "$POM_V" != "$V" ]; then
+            echo "::error::pom 版本($POM_V)与 tag 版本($V)不一致——先改 pom 版本再打 tag（可用 java/release.sh $V）"
+            exit 1
+          fi
+
+      - name: 检查 repo1 上该版本是否已发布（Central 同版本不可重发）
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          BASE="https://repo1.maven.org/maven2/io/github/objectyan"
+          FAIL=0
+          for m in cryptunnel-parent cryptunnel-core cryptunnel-starter-common cryptunnel-starter-javax cryptunnel-starter-jakarta; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' -I "$BASE/$m/$V/$m-$V.pom")"
+            if [ "$code" = "200" ]; then
+              echo "::error::$m:$V 已在 Central 发布——同版本不可重发，请换版本号"
+              FAIL=1
+            else
+              echo "$m:$V -> HTTP $code（未发布，放行）"
+            fi
+          done
+          [ "$FAIL" = "0" ] || exit 1
+
+  publish-javax:
+    name: 发布 javax（JDK8：parent+core+common+javax）
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 8 + Central 凭据 + GPG 密钥
+        uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: 'corretto'
+          cache: maven
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      # 与 release.sh 第 2 步逐字一致；deploy 自带单测，发布前必须全绿
+      - name: mvn -Prelease,boot25 clean deploy
+        working-directory: java
+        run: mvn -B -Prelease,boot25 clean deploy
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+  publish-jakarta:
+    name: 发布 jakarta（JDK17：仅 starter-jakarta）
+    needs: publish-javax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17 + Central 凭据 + GPG 密钥
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'corretto'
+          cache: maven
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      # 与 release.sh 第 3 步逐字一致；-pl 不能省，否则重发 parent/core/common
+      - name: mvn -Prelease,jakarta -pl cryptunnel-starter-jakarta clean deploy
+        working-directory: java
+        run: mvn -B -Prelease,jakarta -pl cryptunnel-starter-jakarta clean deploy
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}

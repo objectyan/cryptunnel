@@ -179,6 +179,17 @@
                         <configuration>
                             <!-- 锁定签名主钥指纹，避免 keyring 里另一枚坏密码旧密钥被误选 -->
                             <keyname>880A1A81030EA764109E2BAC7D055743CE30D5EF</keyname>
+                            <!--
+                                CI（GitHub Actions runner）没有 pinentry，不配 loopback 会挂
+                                "gpg: signing failed: Inappropriate ioctl for device"。
+                                密码由 maven-gpg-plugin 3.2+ 从 MAVEN_GPG_PASSPHRASE 环境变量读取
+                                （workflow release-maven.yml 注入；本地发布时走 settings.xml
+                                <id>gpg</id> 的 gpg.passphrase，loopback 不影响本地路径）。
+                            -->
+                            <gpgArguments>
+                                <arg>--pinentry-mode</arg>
+                                <arg>loopback</arg>
+                            </gpgArguments>
                         </configuration>
                         <executions>
                             <execution>

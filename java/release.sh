@@ -10,9 +10,13 @@
 #      （javax/jakarta 互斥于 boot25/jakarta 两个 profile，不能同 reactor 编译；
 #       但 versions:set 只改写 pom、不编译，所以分两个 profile 各跑一次即可覆盖全 5 个 pom）
 #   2) 发 javax   : mvn -Prelease,boot25 clean deploy                              （JDK 8）
-#   3) 发 jakarta : mvn -Prelease,jakarta -pl cryptunnel-starter-jakarta clean deploy （JDK 17）
+#   3) 发 jakarta : mvn -Prelease,jakarta -pl cryptunnel-starter-jakarta clean deploy (JDK 17)
 #      —— 第 3 步必须带 -pl 只发 jakarta，否则会重发已发布的 parent/core/common，
 #         触发 Central "already exists" FAILED（见项目 MEMORY.md「发布流程」一节）
+#
+# 也可不打这个脚本，改打 tag 让 GitHub Actions 自动跑 2)+3)：
+#     git tag java-v1.0.1 && git push origin java-v1.0.1
+# （见 .github/workflows/release-maven.yml；凭据走 GitHub Secrets，本机无需 settings.xml）
 #
 # 前置：
 #   - ~/.m2/settings.xml 里 <server id=central> 与 <server id=gpg> 已配好
