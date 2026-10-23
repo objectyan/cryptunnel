@@ -30,4 +30,10 @@ cryptunnel-crypto = { path = "../../cryptunnel-crypto" }
 cryptunnel-tunnel = { path = "../../cryptunnel-tunnel" }
 tokio = { version = "1", features = ["full"] }
 
+# 读取/修正 HKCU\...\Run 里的自启命令行：插件只在 enable() 时写注册表，已存在的旧项
+# 不会自我更新，需要启动时补一次参数（见 lib.rs 的 repair_autostart_cmd）。
+# 版本与 workspace 里已有的 winreg 0.55 对齐，离线构建可复用同一份源码。
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
 # 注意：[profile.release] 在 workspace 根（cryptunnel-crypto/Cargo.toml），成员包里的 profile 会被 cargo 忽略。

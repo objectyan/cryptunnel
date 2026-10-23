@@ -220,10 +220,7 @@ pub fn run() {
             // 主窗口默认隐藏（tauri.conf.json visible=false），此处按启动来源决定是否显示：
             // 开机自启（带 --autostart）→ 仅驻留托盘静默启动；手动启动 → 显示主面板。
             // 这样自启时不会突然弹窗（老版 .NET 客户端同款行为）。
-            let launched_by_autostart = std::env::args().any(|a| a == "--autostart");
-            if !launched_by_autostart {
-                show_main_window(&app.handle());
-            }
+            let launched_by_autostart = launched_by_autostart();
             // 装配会话日志落盘（对齐 .NET 老版 logs/proxy.log 滚动规则）。
             // 目录解析失败/无权限时 logger 仍然可用（写时吞错），绝不影响启动。
             let log_dir = file_log::resolve_log_dir(&app.handle());
@@ -233,6 +230,27 @@ pub fn run() {
                 file_log::DEFAULT_RETAIN_DAYS,
             ));
             app.state::<TunnelManager>().attach_logger(logger);
+            // 自启项自愈：旧版本（≤0.1.6）写进注册表的命令行没有 --autostart，上面就会
+            // 判定成「手动启动」→ 每次开机都弹窗，而且用户开关本来就是开的，插件永远不会
+            // 重写那条旧命令。这里只补参数、不动启用状态。
+            // 注意：对**本次**启动无效（进程已起来、窗口已按旧判定处理），目的是让下一次
+            // 开机静默；失败只写日志，绝不影响启动。
+            match repair_autostart_cmd(&app.package_info().name) {
+                Ok(Some(cmd)) => app_log(
+                    &app.handle(),
+                    cryptunnel_tunnel::LogLevel::Info,
+                    &format!("开机自启命令行缺少 {AUTOSTART_ARG}，已自动补全：{cmd}"),
+                ),
+                Ok(None) => {}
+                Err(e) => app_log(
+                    &app.handle(),
+                    cryptunnel_tunnel::LogLevel::Warn,
+                    &format!("开机自启项检查失败（不影响启动）：{e}"),
+                ),
+            }
+            if !launched_by_autostart {
+                show_main_window(&app.handle());
+            }
             // 启动时自动拉起所有 enabled=true 的隧道（对齐 .NET 老版「启用即随应用启动」）；
             // 单个项目失败只写文件日志，不影响应用启动。
             tunnel_state::autostart_enabled_tunnels(&app.handle(), app.state::<TunnelManager>().inner());
@@ -307,6 +325,101 @@ fn crypto_self_check() -> String {
         hmac.len(),
         sm4.len()
     )
+}
+
+// ============================================================================
+// 开机自启：命令行标记 + 旧自启项自愈
+// ============================================================================
+
+/// 开机自启时追加的标记参数，供 `setup` 区分「被系统拉起」与「用户手动打开」。
+/// 必须与 `tauri_plugin_autostart::init` 传入的第三个参数一致。
+const AUTOSTART_ARG: &str = "--autostart";
+
+/// 本次进程是否由开机自启拉起。
+fn launched_by_autostart() -> bool {
+    std::env::args().any(|a| a == AUTOSTART_ARG)
+}
+
+/// 给自启命令行补上标记参数：`None` = 无需修改（已带参数或命令行为空）。
+///
+/// 之所以要在启动时自己修：`tauri-plugin-autostart` 只在 `enable()` 里写注册表，
+/// **已存在**的自启项不会被重写。`--autostart` 是 0.1.6 之后才加的，此前用户点开的
+/// 自启开关写下的命令只有 exe 路径，于是升级后每次开机都被当成手动启动 → 弹主窗口。
+fn autostart_cmd_with_arg(cmd: &str, arg: &str) -> Option<String> {
+    let tokens = split_cmd_line(cmd);
+    if tokens.is_empty() || tokens.iter().any(|t| t == arg) {
+        return None;
+    }
+    Some(format!("{} {}", tokens.join(" "), arg))
+}
+
+/// 按空白切分命令行，但引号内的空白算路径的一部分。
+///
+/// 不这样切会出两个错：`"C:\Program Files\...\app.exe"` 被拆成三段后补参数会把路径
+/// 写坏；反过来把 `--autostart-foo` 当成已带 `--autostart` 又会漏修。
+fn split_cmd_line(cmd: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_quote = false;
+    for ch in cmd.chars() {
+        match ch {
+            '"' => {
+                in_quote = !in_quote;
+                cur.push(ch);
+            }
+            c if c.is_whitespace() && !in_quote => {
+                if !cur.is_empty() {
+                    tokens.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        tokens.push(cur);
+    }
+    tokens
+}
+
+/// 修正 Windows 自启项，让它带上标记参数；返回被改写后的命令行（`None` = 未改动）。
+///
+/// 只改「命令行内容」，**不碰** `StartupApproved`：改走插件 `enable()` 会把任务管理器里
+/// 的禁用状态一并重置成「启用」，等于替用户把自启重新打开。
+#[cfg(windows)]
+fn repair_autostart_cmd(app_name: &str) -> Result<Option<String>, String> {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE};
+    use winreg::RegKey;
+
+    const RUN_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let run = hkcu
+        .open_subkey_with_flags(RUN_KEY, KEY_READ | KEY_SET_VALUE)
+        .map_err(|e| e.to_string())?;
+    // 值不存在 = 用户没开自启，什么都不做。
+    let current: String = match run.get_value(app_name) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+    let Some(fixed) = autostart_cmd_with_arg(&current, AUTOSTART_ARG) else {
+        return Ok(None);
+    };
+    run.set_value(app_name, &fixed).map_err(|e| e.to_string())?;
+    Ok(Some(fixed))
+}
+
+/// macOS / Linux 的自启项（LaunchAgent plist / autostart .desktop）由插件在 `enable()`
+/// 时整份重写，关掉再打开一次开关即可自愈；这里不做自动改写，避免自己解析各平台配置格式。
+#[cfg(not(windows))]
+fn repair_autostart_cmd(_app_name: &str) -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+/// 写一条应用级日志（无项目归属）；logger 尚未装配时静默丢弃。
+fn app_log(app: &tauri::AppHandle, level: cryptunnel_tunnel::LogLevel, message: &str) {
+    if let Some(logger) = app.state::<TunnelManager>().logger() {
+        logger.log(level, None, message);
+    }
 }
 
 #[tauri::command]
@@ -699,7 +812,7 @@ fn tunnel_status(mgr: tauri::State<'_, TunnelManager>) -> Result<String, String>
 
 #[cfg(test)]
 mod tests {
-    use super::tray_menu_origin;
+    use super::{autostart_cmd_with_arg, split_cmd_line, tray_menu_origin};
 
     /// 常规：菜单贴光标左上方展开（托盘在右下角，向上向左弹）。
     #[test]
@@ -774,5 +887,61 @@ mod tests {
             Some(((0.0, 0.0), (100.0, 100.0))),
         );
         assert_eq!(p, (0.0, 0.0));
+    }
+
+    /// 本机注册表的真实形态：0.1.6 之前写入的自启项只有 exe 路径、没有参数。
+    /// 这正是「开机启动还是弹窗」的根因，必须被判定为需要补参数。
+    #[test]
+    fn autostart_repairs_cmd_without_arg() {
+        let cmd = r"C:\Users\OY\AppData\Local\Cryptunnel\cryptunnel-app.exe";
+        assert_eq!(
+            autostart_cmd_with_arg(cmd, "--autostart"),
+            Some(format!("{cmd} --autostart"))
+        );
+    }
+
+    /// 已经带参数（新版插件写入的形态）不得重复追加。
+    #[test]
+    fn autostart_keeps_cmd_with_arg() {
+        let cmd = r"C:\Users\OY\AppData\Local\Cryptunnel\cryptunnel-app.exe --autostart";
+        assert_eq!(autostart_cmd_with_arg(cmd, "--autostart"), None);
+    }
+
+    /// 路径含空格时必须整段保留：若按空白硬切，补参数后路径会被截断成
+    /// `"C:\Program`，注册表里就成了永远起不来的命令。
+    #[test]
+    fn autostart_preserves_quoted_path_with_spaces() {
+        let cmd = r#""C:\Program Files\Cryptunnel\cryptunnel-app.exe""#;
+        assert_eq!(
+            autostart_cmd_with_arg(cmd, "--autostart"),
+            Some(format!(r#"{cmd} --autostart"#))
+        );
+        assert_eq!(split_cmd_line(cmd).len(), 1);
+    }
+
+    /// 前缀相同的参数（`--autostart-foo`）不算已带标记，否则会漏修。
+    #[test]
+    fn autostart_is_not_fooled_by_arg_prefix() {
+        let cmd = r"C:\app.exe --autostart-foo";
+        assert_eq!(
+            autostart_cmd_with_arg(cmd, "--autostart"),
+            Some(format!("{cmd} --autostart"))
+        );
+    }
+
+    /// 已有其它参数时追加到末尾，不覆盖原参数。
+    #[test]
+    fn autostart_appends_after_existing_args() {
+        assert_eq!(
+            autostart_cmd_with_arg(r"C:\app.exe --verbose", "--autostart"),
+            Some(r"C:\app.exe --verbose --autostart".to_string())
+        );
+    }
+
+    /// 空值/空白值不动：可能是不认识的残留项，乱写会造出一条坏命令。
+    #[test]
+    fn autostart_ignores_blank_cmd() {
+        assert_eq!(autostart_cmd_with_arg("", "--autostart"), None);
+        assert_eq!(autostart_cmd_with_arg("   ", "--autostart"), None);
     }
 }

@@ -2,6 +2,21 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复（客户端）
+
+- **开机自启仍会弹出主窗口**：`--autostart` 标记是 0.1.6 之后才引入的，而
+  `tauri-plugin-autostart` 只在 `enable()` 时写注册表——**已存在**的自启项永远不会被
+  重写。早前就打开过「开机启动」的用户，注册表里那条命令只有 exe 路径，升级后进程
+  认不出自己是被系统拉起的，于是每次开机都按「手动启动」处理并弹窗；而且开关一直是
+  开的，用户也没有任何办法让它自愈。
+  现在启动时读一次 `HKCU\...\CurrentVersion\Run` 里自己的命令，缺参数就补上。
+  两条约束：只改命令行内容、**不动 `StartupApproved`**（走插件 `enable()` 会把任务
+  管理器里的禁用状态重置成「启用」，等于替用户重新打开自启）；路径含空格时按引号整体
+  保留，`--autostart-foo` 这类前缀参数不会被误判为已带标记。
+  对本次启动无效（进程已起来），修的是下一次开机。
+
 ## [1.1.0] - 2026-10-23
 
 > 服务端 `io.github.objectyan` **1.1.0** 与客户端 **0.1.7** 同批发布。
@@ -106,7 +121,7 @@
 | `dotnet/build/parity` | 52 + 3 | 双向跨语言字节级对齐（改造后仍与 Java 服务端兼容） |
 | `cryptunnel-core` 单元测试 | 79 | 认证编解码、target 发现、三算法、帧读取、nonce、容量核算；JDK 8 与 JDK 17 两 profile 同数 |
 | `cryptunnel-starter-*` 单元测试 | 9 | WS 心跳发送、静默会话回收、Pong 续命、发送失败释放、传输错误分类、容量超限与认证失败的 close reason 区分；javax / jakarta 双份同数 |
-| `cryptunnel-{tunnel,crypto,app}` 单元测试 | 51 / 2 / 9 | Rust 客户端：HTTP 状态码分类（含 5xx）、认证与重连、帧编解码、跨语言字节对齐、托盘 DPI 定位 |
+| `cryptunnel-{tunnel,crypto,app}` 单元测试 | 51 / 2 / 15 | Rust 客户端：HTTP 状态码分类（含 5xx）、认证与重连、帧编解码、跨语言字节对齐、托盘 DPI 定位、自启命令行补参 |
 | `docs/.rename-protect-selftest.py` | 11 | 改名规则的历史字符串保护，含 3 项变异验证（摘掉规则后必须失败） |
 
 > `FramingVerify` 的 close reason 覆盖比对**曾因改名连带事故退化为 SKIP**（134 项 + 1 跳过）：
