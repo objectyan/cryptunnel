@@ -112,12 +112,28 @@ jobs:
           server-username: CENTRAL_USERNAME
           server-password: CENTRAL_PASSWORD
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
-          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+          gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      # 固定 Maven 版本：runner 镜像预装的 Maven 不可控（ubuntu-latest 自 10/19 起
+      # 迁到 Ubuntu 26），与 JDK8 的组合可能直接起不来且报错难猜。
+      # 锁 3.9.9 = 本地验证过的组合（JDK8 corretto + Maven 3.9.x）。
+      - name: Install Maven 3.9.9（固定版本，JDK8 兼容）
+        run: |
+          set -euo pipefail
+          MAVEN_VERSION=3.9.9
+          curl -fsSL -o /tmp/maven.tar.gz "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+          sudo tar -xzf /tmp/maven.tar.gz -C /opt
+          echo "/opt/apache-maven-${MAVEN_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: 工具链自检（Maven / Java 版本写进日志，失败时一眼定性）
+        run: |
+          mvn -version
+          java -version
 
       # 与 release.sh 第 2 步逐字一致；deploy 自带单测，发布前必须全绿
       - name: mvn -Prelease,boot25 clean deploy
         working-directory: java
-        run: mvn -B -Prelease,boot25 clean deploy
+        run: mvn -B -e -Prelease,boot25 clean deploy
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
@@ -140,12 +156,25 @@ jobs:
           server-username: CENTRAL_USERNAME
           server-password: CENTRAL_PASSWORD
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
-          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+          gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Install Maven 3.9.9（固定版本，JDK17 兼容）
+        run: |
+          set -euo pipefail
+          MAVEN_VERSION=3.9.9
+          curl -fsSL -o /tmp/maven.tar.gz "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+          sudo tar -xzf /tmp/maven.tar.gz -C /opt
+          echo "/opt/apache-maven-${MAVEN_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: 工具链自检（Maven / Java 版本）
+        run: |
+          mvn -version
+          java -version
 
       # 与 release.sh 第 3 步逐字一致；-pl 不能省，否则重发 parent/core/common
       - name: mvn -Prelease,jakarta -pl cryptunnel-starter-jakarta clean deploy
         working-directory: java
-        run: mvn -B -Prelease,jakarta -pl cryptunnel-starter-jakarta clean deploy
+        run: mvn -B -e -Prelease,jakarta -pl cryptunnel-starter-jakarta clean deploy
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
