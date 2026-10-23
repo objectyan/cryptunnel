@@ -2,9 +2,11 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.1.8] - 2026-10-23
 
-### 修复（客户端）
+> 仅客户端。服务端仍为 **1.1.0**，无需重新发布或升级。
+
+### 修复
 
 - **开机自启仍会弹出主窗口**：`--autostart` 标记是 0.1.6 之后才引入的，而
   `tauri-plugin-autostart` 只在 `enable()` 时写注册表——**已存在**的自启项永远不会被

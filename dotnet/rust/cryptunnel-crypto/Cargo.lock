@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "cryptunnel-app"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "cryptunnel-crypto",
  "cryptunnel-tunnel",
@@ -756,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "cryptunnel-crypto"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -771,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "cryptunnel-tunnel"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "cryptunnel-crypto",
  "futures-util",
