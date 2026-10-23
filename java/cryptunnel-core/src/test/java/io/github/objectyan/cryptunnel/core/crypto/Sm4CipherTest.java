@@ -125,15 +125,23 @@ public class Sm4CipherTest {
      * （输出 63 字节）。<b>跨算法硬失败是概率防线，不是确定性防线</b>；
      * 部署层的真正防线是两端配置核对 + 服务端日志 cipherId（见 ADR-0003）。
      *
-     * <p>所以本测试的口径是「拒绝率必须 ≥ 99%」：512 个独立样本（随机 IV），
+     * <p>所以本测试的口径是「拒绝率必须 ≥ 98%」（512 个独立样本，随机 IV；
+     * 阈值取 10 而非 5，理由见 {@link #CROSS_LUCKY_TOLERANCE}），
      * 若隔离机制整体失效（例如有人把密钥派生前缀改成相同），解出率会是 ~100%，
      * 与 1/256 的天然噪音有数量级差距，测试稳定区分两种情形。
      * 采样耗时亚毫秒级/个，测试总时长与原来相当。</p>
      */
     private static final int CROSS_SAMPLES = 512;
 
-    /** 天然填充巧合容忍上限（约 1/256 × 512 ≈ 2 个的期望，放宽到 5 个防抖动）。 */
-    private static final int CROSS_LUCKY_TOLERANCE = 5;
+    /**
+     * 天然填充巧合容忍上限。
+     *
+     * <p>lucky ~ Binomial(512, 1/256)，均值 λ = 2。原阈值 5 对应 P(lucky ≥ 6) ≈ 1.7% ——
+     * 即**每 60 次 CI 就会红一次**（2026-10-23 java-core 实际以 6/512 命中）。
+     * 阈值 10 时 P(lucky ≥ 11) ≈ 7e-6（约 1/14 万），同时与「隔离失效」的 512/512 仍差两个数量级，
+     * 判定力不受影响：本测试防的是「密钥派生前缀被改成相同 → 100% 解出」，不是 1% 与 2% 的区分。</p>
+     */
+    private static final int CROSS_LUCKY_TOLERANCE = 10;
 
     @Test
     public void open_aesCbcPayload_fails() {

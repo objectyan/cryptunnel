@@ -139,17 +139,29 @@ jobs:
           fi
           echo "collected $n files"
 
-      # Release 正文取自标签注释（git tag -a v0.1.7 -m "..."），否则 body 为空：
+      # Release 正文取自标签注释（git tag -a v0.1.7 -F ...），否则 body 为空：
       # latest.json 的 notes 会退化成「Cryptunnel vX.Y.Z 发布」，用户点更新只看得到这一句。
-      # 用 %(contents) 而非 %(contents:subject) 保留多行说明。
+      #
+      # 坑（v0.1.7 首发踩到）：actions/checkout 检出 tag 时，本地 refs/tags/<tag> 指向的是
+      # **提交**（按 SHA 取的轻量形态），此时 %(contents) 拿到的是提交信息而不是标签注释，
+      # 发布正文于是变成上一条 commit message。必须按 refname 显式重取，并用 objecttype
+      # 确认拿到的是 tag 对象，才读 %(contents)。
       - name: Extract release notes from tag
         shell: bash
         run: |
-          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > release-notes.md
+          git fetch --force --no-tags origin \
+            "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" || true
+          obj=$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}" 2>/dev/null || echo unknown)
+          echo "tag object type: $obj"
+          if [ "$obj" = "tag" ]; then
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > release-notes.md
+          else
+            : > release-notes.md
+          fi
           # 取不到注释时不能留空文件：latest.json 的 notes 会跟着变空，更新弹窗没有内容。
           if [ ! -s release-notes.md ]; then
             echo "Cryptunnel v$VERSION" > release-notes.md
-            echo "::warning::标签 $GITHUB_REF_NAME 没有注释，发布正文用兜底文案"
+            echo "::warning::标签 $GITHUB_REF_NAME 没有注释（objecttype=$obj），发布正文用兜底文案"
           fi
           echo "--- release-notes.md ---"
           cat release-notes.md

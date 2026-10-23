@@ -229,28 +229,43 @@ env -u HTTPS_PROXY -u HTTP_PROXY \
 ### 4.2 发正式版本
 
 ```bash
-# 1. 改版本号为正式号
-mvn versions:set -DnewVersion=1.0.0
+# 1. 改版本号为正式号（8 处：父 POM + 4 个子模块的 parent 段 + starter-common 对 core 的依赖）
+mvn versions:set -DnewVersion=1.1.0
 
 # 2. 发 javax（Boot 2.5）—— autoPublish=true + waitUntil=published
 #    意味着这条命令跑完就是真上线，不需要再去 Portal 手点
+#    这一批会连 parent / core / starter-common 一起发上去
 env -u HTTPS_PROXY -u HTTP_PROXY \
-  mvn.cmd -Pboot25 clean deploy
+  mvn.cmd -Prelease,boot25 clean deploy
 
 # 3. 发 jakarta（Boot 3.x / 4.x 共用一份 jar）
+#    ⚠ 必须只发这一个模块：parent / core / starter-common 的 1.1.0 已在第 2 步发布，
+#    整个 profile 再 deploy 一次会因「Component ... already exists」整批失败
+#    （2026-10-23 发 1.1.0 时真实踩到，javax 已上线、jakarta 那批被拒）。
 env -u HTTPS_PROXY -u HTTP_PROXY \
-  mvn.cmd -Pjakarta clean deploy
+  mvn.cmd -Prelease,jakarta deploy -pl cryptunnel-starter-jakarta
 
 # 4. 几分钟后 artifact 出现在：
 #    https://repo1.maven.org/maven2/io/github/objectyan/
 ```
+
+> **签名口令（2026-10-23 补充）**：口令存在 `~/.m2/settings.xml` 的 `<server><id>gpg</id>` 里，
+> 但 gpg-agent 只缓存 10 分钟。两批之间隔超过 10 分钟，第二批会转去等 pinentry（无 TTY 时静默挂死，
+> 日志停在 `gpg-agent: socket file removed - retrying binding`）。稳妥做法是显式传：
+>
+> ```bash
+> -Dgpg.passphrase=<口令> -Dgpg.pinentryMode=loopback \
+> -Dgpg.executable="C:/Program Files/GnuPG/bin/gpg.exe"
+> ```
+>
+> `gpg.executable` 也不能省：msys 自带的 `/usr/bin/gpg` 在本机会陷入 `removing stale lockfile` 死循环。
 
 > **老流程对比**：OSSRH 时代要先 deploy 到 staging，再登 `oss.sonatype.org` 找
 > staging repo → 点 Close → 等校验 → 点 Release。现在 `autoPublish` + `waitUntil=published`
 > 把这套「手点仪式」压进构建：命令返回 0 就是已发布，返回非 0 就是没发出去，不存在中间态。
 
 > **2026-09-08 简化**：之前规划分别发 `1.0.0-boot25` / `1.0.0-boot3x` / `1.0.0-boot4x` 三次。jakarta 在 Boot 3.x/4.x 下产物字节级一致，
-> 合并为单 `jakarta` profile；整轮只发两个 jar（javax + jakarta），都在 `1.0.0` 版本号下。
+> 合并为单 `jakarta` profile；整轮只发两个 jar（javax + jakarta），都在同一版本号下。
 
 ### 4.3 在 sunrise 引正式版
 

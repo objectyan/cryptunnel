@@ -194,6 +194,21 @@
     反而比直接显示状态码更难排查；同时把 503 翻译成「服务端连接数已达上限，请关闭空闲会话或调大配置」；
   - 服务端日志随之可区分：`target capacity exceeded, target=...` 与 `auth failed, reason=...`。
   认证阶段的三条失败路径收敛到唯一出口 `handleAuthFailure`，避免下次新增异常类型时又漏掉映射。
+- **跨算法隔离测试是概率型断言，阈值定得过紧**：`Sm4CipherTest` 的 `lucky` 服从
+  Binomial(512, 1/256)（λ=2），原阈值 5 对应 P(lucky ≥ 6) ≈ **1.7%** —— 每 60 次 CI 就红一次，
+  2026-10-23 的 java-core 以 6/512 真实命中，把一次发布卡成了红灯。
+  阈值放宽到 10（P ≈ 7e-6），与「隔离失效 = 512/512」仍差两个数量级，判定力不受影响：
+  本测试防的是「密钥派生前缀被改成相同 → 100% 解出」，不是 1% 与 2% 的区分。
+- **客户端发布正文抓错对象**：`release-tauri.yml` 用 `git tag -l --format='%(contents)'` 取标签注释，
+  但 actions/checkout 检出 tag 时本地 `refs/tags/<tag>` 指向的是**提交**（按 SHA 取的轻量形态），
+  `%(contents)` 于是返回提交信息 —— v0.1.7 首发时 Release 正文与 `latest.json` 的 `notes`
+  都变成了上一条 commit message，用户点更新看到的就是那行 CI 提交标题。
+  改为按 refname 显式 `git fetch --force`，并用 `git cat-file -t` 确认拿到的是 tag 对象再读注释。
+- **`docs/central-publish.md` 的发布步骤会稳定失败**：文档让两个 profile 各跑一次 `clean deploy`，
+  但两批都会带 parent / core / starter-common，第二批必然因 `Component ... already exists` 整批被拒
+  （2026-10-23 发 1.1.0 时实测：javax 批上线，jakarta 批失败）。改为第二步只发
+  `-pl cryptunnel-starter-jakarta`；同时补上签名口令的两条隐性前提（gpg-agent 缓存仅 10 分钟、
+  msys 的 gpg 在本机会死循环），这两条都能让发布**静默挂死**而不是报错。
 
 ### 重构与更名
 
