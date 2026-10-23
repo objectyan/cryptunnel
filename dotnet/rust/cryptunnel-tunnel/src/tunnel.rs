@@ -499,8 +499,8 @@ async fn try_http(
             return Ok(false);
         }
     };
-    if connect_resp.is_empty() || connect_resp.starts_with('4') {
-        log(LogLevel::Error, format!("HTTP 连接建立失败：{connect_resp}"));
+    if connect_resp.is_empty() || is_error_status(&connect_resp) {
+        log(LogLevel::Error, http_failure_message(&connect_resp));
         return Ok(false);
     }
     let mut parts = connect_resp.splitn(2, ':');
@@ -582,5 +582,52 @@ async fn post(
             }
         }
         Err(_) => None,
+    }
+}
+
+/// 响应体是 3 位数字状态码即视为失败（4xx / 5xx）。
+///
+/// 原实现只认 `starts_with('4')`：服务端把容量超限从 401 改成 503（契约 §6）后，
+/// 503 会落进「响应格式错误」分支——比直接显示状态码更难排查。
+fn is_error_status(body: &str) -> bool {
+    body.len() == 3
+        && body.bytes().all(|b| b.is_ascii_digit())
+        && (body.starts_with('4') || body.starts_with('5'))
+}
+
+/// 把 HTTP 失败状态码翻译成可操作的提示。
+fn http_failure_message(body: &str) -> String {
+    match body {
+        // 与服务端 WS 侧 close reason "Max connections exceeded" 对齐：同一件事，同一套话术
+        "503" => "HTTP 连接建立失败：服务端连接数已达上限（maxConnections）。\
+                  请关闭空闲的数据库会话，或让管理员调大 cryptunnel 的 maxConnections。"
+            .to_string(),
+        other => format!("HTTP 连接建立失败：{other}"),
+    }
+}
+
+#[cfg(test)]
+mod http_status_tests {
+    use super::*;
+
+    #[test]
+    fn error_status_covers_4xx_and_5xx() {
+        assert!(is_error_status("401"));
+        assert!(is_error_status("503"));
+        assert!(!is_error_status("200"));
+        // 成功响应是 "connId:encHandshake"，不能被误判成状态码
+        assert!(!is_error_status("HC-1234:abc"));
+        assert!(!is_error_status(""));
+    }
+
+    #[test]
+    fn capacity_message_is_actionable() {
+        let msg = http_failure_message("503");
+        assert!(msg.contains("maxConnections"));
+    }
+
+    #[test]
+    fn other_status_keeps_code_visible() {
+        assert!(http_failure_message("401").contains("401"));
     }
 }

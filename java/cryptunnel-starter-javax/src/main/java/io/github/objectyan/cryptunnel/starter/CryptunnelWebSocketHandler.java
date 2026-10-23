@@ -11,19 +11,30 @@ import io.github.objectyan.cryptunnel.core.tunnel.AuthenticatedSessionManager;
 import io.github.objectyan.cryptunnel.core.tunnel.DefaultAuthenticatedSessionManager;
 import io.github.objectyan.cryptunnel.core.tunnel.MySqlConnection;
 import io.github.objectyan.cryptunnel.core.tunnel.TargetCapacityExceededException;
+import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.nio.channels.ClosedChannelException;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.crypto.spec.SecretKeySpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.PingMessage;
+import org.springframework.web.socket.PongMessage;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
@@ -68,6 +79,17 @@ public class CryptunnelWebSocketHandler extends AbstractWebSocketHandler {
      */
     private final Set<String> admitted = ConcurrentHashMap.newKeySet();
 
+    /**
+     * 心跳跟踪表：sessionId → 会话 + 最近入站帧时间。
+     *
+     * <p>覆盖「已建立但未认证」的合法中间态——这类会话没有 {@link #sessions} 条目，
+     * 但同样占着 {@code maxConnections} 槽位，半开连接（连上就消失的扫描器）
+     * 必须靠心跳超时回收。</p>
+     */
+    private final Map<String, HeartbeatEntry> heartbeats = new ConcurrentHashMap<String, HeartbeatEntry>();
+
+    private ScheduledExecutorService heartbeatScheduler;
+
     public CryptunnelWebSocketHandler(CryptunnelProperties properties,
                                      AuthenticatedSessionManager sessionManager,
                                      TargetRegistry targetRegistry) {
@@ -78,6 +100,140 @@ public class CryptunnelWebSocketHandler extends AbstractWebSocketHandler {
             this.sessionManagerImpl = (DefaultAuthenticatedSessionManager) sessionManager;
         } else {
             this.sessionManagerImpl = null;
+        }
+    }
+
+    // ============================================================================
+    // 心跳与死链路回收
+    // ============================================================================
+
+    /**
+     * 启动私有心跳调度器（{@code @PostConstruct}，随 Bean 创建自动触发）。
+     *
+     * <p><b>为什么自建而不用 {@code @Scheduled}</b>：与
+     * {@link CryptunnelHttpController#startCleaner()} 同理——{@code @EnableScheduling}
+     * 是<b>全局开关</b>，会把整个宿主应用的定时任务机制打开。使用方只是引入一个
+     * Cryptunnel starter，不该因此改变自身应用的调度行为。</p>
+     */
+    @PostConstruct
+    public void startHeartbeat() {
+        int interval = properties.getHeartbeatInterval();
+        if (interval <= 0) {
+            log.info("Cryptunnel: WS heartbeat disabled (heartbeatInterval=0)");
+            return;
+        }
+        heartbeatScheduler = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "cryptunnel-ws-heartbeat");
+                // 守护线程：心跳绝不能阻止 JVM 退出
+                t.setDaemon(true);
+                return t;
+            }
+        });
+        heartbeatScheduler.scheduleWithFixedDelay(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    heartbeatTick();
+                } catch (Throwable t) {
+                    // 必须吞掉：scheduleWithFixedDelay 一旦任务抛异常就会永久停止后续执行，
+                    // 那会让心跳静默失效——正是本次修复要消灭的那类故障。
+                    log.error("Cryptunnel: WS heartbeat tick failed", t);
+                }
+            }
+        }, interval, interval, TimeUnit.MILLISECONDS);
+        log.info("Cryptunnel: WS heartbeat started, interval={}ms, timeout={}ms",
+                interval, properties.getHeartbeatTimeout());
+    }
+
+    /**
+     * 停止心跳并释放所有在途会话（{@code @PreDestroy}）。
+     *
+     * <p>与 {@link CryptunnelHttpController#stopCleaner()} 同样的防御：
+     * 容器关停时不能遗留 MySQL 连接与连接计数。</p>
+     */
+    @PreDestroy
+    public void stopHeartbeat() {
+        if (heartbeatScheduler != null) {
+            heartbeatScheduler.shutdownNow();
+        }
+        for (String sessionId : heartbeats.keySet()) {
+            HeartbeatEntry entry = heartbeats.get(sessionId);
+            if (entry != null) {
+                closeQuietly(entry.session, CloseStatus.SERVICE_RESTARTED.withReason("Server shutting down"));
+            }
+        }
+        heartbeats.clear();
+    }
+
+    /**
+     * 单个心跳周期：先回收死链路，再给存活会话发 Ping。
+     *
+     * <p><b>顺序有讲究</b>：Ping 发送在客户端不读的极端情况下会阻塞（TCP 背压），
+     * 先做回收可保证其他会话的回收决策不被这一次阻塞拖掉——心跳线程被挂住时，
+     * 后果是所有会话一起失去心跳，而不仅是被挂住的那一个。</p>
+     */
+    private void heartbeatTick() {
+        long now = System.currentTimeMillis();
+        long timeout = properties.getHeartbeatTimeout();
+
+        // pass 1：回收静默会话
+        if (timeout > 0) {
+            for (HeartbeatEntry entry : heartbeats.values()) {
+                WebSocketSession wsSession = entry.session;
+                long silentMs = now - entry.lastSeen;
+                if (silentMs > timeout) {
+                    log.warn("Cryptunnel: WS session silent for {}ms > heartbeatTimeout={}ms, reaping, sessionId={}",
+                            silentMs, timeout, wsSession.getId());
+                    closeQuietly(wsSession, CloseStatus.SESSION_NOT_RELIABLE.withReason("Heartbeat timeout"));
+                    cleanup(wsSession);
+                }
+            }
+        }
+
+        // pass 2：给存活会话发 Ping
+        for (HeartbeatEntry entry : heartbeats.values()) {
+            WebSocketSession wsSession = entry.session;
+            if (!wsSession.isOpen()) {
+                continue; // 关闭回调会走 cleanup 摘除；这里防呆，避免向已关会话写
+            }
+            try {
+                // 与 reader 线程的发送保持同一把锁：并发写同一会话会帧交错，
+                // 直接破坏 WebSocket 帧边界
+                synchronized (wsSession) {
+                    if (wsSession.isOpen()) {
+                        wsSession.sendMessage(new PingMessage());
+                    }
+                }
+            } catch (IOException e) {
+                // 发送失败 = 链路已死（FIN 可能还没到，但写已经不通）。
+                // 走统一出口释放，不依赖 TCP keepalive 慢速探知。
+                log.warn("Cryptunnel: WS heartbeat send failed, sessionId={}", wsSession.getId(), e);
+                cleanup(wsSession);
+            } catch (RuntimeException e) {
+                // 容器在关闭竞态下可能抛 IllegalStateException。单个会话出错不应中断
+                // 整轮心跳——否则一个坏会话会让所有会话一起失去保活。
+                log.warn("Cryptunnel: WS heartbeat send error, sessionId={}", wsSession.getId(), e);
+            }
+        }
+    }
+
+    /** 记录入站帧时间。任何入站帧（数据 / Pong）都是存活证据。 */
+    private void touch(WebSocketSession wsSession) {
+        HeartbeatEntry entry = heartbeats.get(wsSession.getId());
+        if (entry != null) {
+            entry.lastSeen = System.currentTimeMillis();
+        }
+    }
+
+    /** 心跳跟踪条目。 */
+    private static final class HeartbeatEntry {
+        final WebSocketSession session;
+        volatile long lastSeen = System.currentTimeMillis();
+
+        HeartbeatEntry(WebSocketSession session) {
+            this.session = session;
         }
     }
 
@@ -93,11 +249,13 @@ public class CryptunnelWebSocketHandler extends AbstractWebSocketHandler {
         // 计数成功后立刻登记凭证：此后任意释放路径都靠 admitted.remove() 决定是否递减。
         // 注意顺序——先 increment 再登记，若反过来，超限退出的分支会留下一个孤儿凭证。
         admitted.add(wsSession.getId());
+        heartbeats.put(wsSession.getId(), new HeartbeatEntry(wsSession));
         log.info("Cryptunnel: WS connection established, active={}", current);
     }
 
     @Override
     protected void handleTextMessage(WebSocketSession wsSession, TextMessage message) throws Exception {
+        touch(wsSession);
         String payload = message.getPayload();
 
         SessionContext ctx = sessions.get(wsSession.getId());
@@ -135,15 +293,37 @@ public class CryptunnelWebSocketHandler extends AbstractWebSocketHandler {
             reader.start();
 
             log.info("Cryptunnel: auth OK, target={}, sessionId={}", target.getName(), wsSession.getId());
-        } catch (AuthFailedException | TargetCapacityExceededException e) {
-            log.warn("Cryptunnel: auth failed, sessionId={}, reason={}", wsSession.getId(), e.getMessage());
-            closeQuietly(wsSession, CloseStatus.NOT_ACCEPTABLE.withReason("Auth failed"));
-            cleanup(wsSession);
         } catch (Exception e) {
+            handleAuthFailure(wsSession, e);
+        }
+    }
+
+    /**
+     * 认证阶段失败的<b>唯一收口</b>：按异常类型给出可区分的 close reason。
+     *
+     * <p><b>为什么容量超限必须单独处理</b>：容量超限与密钥错误在客户端是两种相反的处置——
+     * 前者「稍后重试 / 关掉空闲会话 / 调大 maxConnections」，后者「去改配置」。
+     * 原先两者共用 {@code Auth failed}，用户看到「认证失败」就去核对密钥，
+     * 而真正原因是服务端槽位已满。这也是契约 §6 的规定：容量超限应为
+     * {@code SERVICE_UNAVAILABLE}（1013）——Spring 的常量名是
+     * {@link CloseStatus#SERVICE_OVERLOAD}，两者同码。</p>
+     */
+    void handleAuthFailure(WebSocketSession wsSession, Exception e) {
+        if (e instanceof TargetCapacityExceededException) {
+            TargetCapacityExceededException cap = (TargetCapacityExceededException) e;
+            log.warn("Cryptunnel: target capacity exceeded, target={}, sessionId={}",
+                    cap.getTargetId(), wsSession.getId());
+            // 复用全局上限的 reason：客户端已把它映射为「连接数已达上限，可重试」的中文提示
+            closeQuietly(wsSession, CloseStatus.SERVICE_OVERLOAD.withReason("Max connections exceeded"));
+        } else if (e instanceof AuthFailedException) {
+            log.warn("Cryptunnel: auth failed, sessionId={}, reason={}",
+                    wsSession.getId(), ((AuthFailedException) e).getReason());
+            closeQuietly(wsSession, CloseStatus.NOT_ACCEPTABLE.withReason("Auth failed"));
+        } else {
             log.warn("Cryptunnel: auth decrypt/parse failed, sessionId={}", wsSession.getId(), e);
             closeQuietly(wsSession, CloseStatus.NOT_ACCEPTABLE.withReason("Auth failed"));
-            cleanup(wsSession);
         }
+        cleanup(wsSession);
     }
 
     private void handleData(WebSocketSession wsSession, String payload, SessionContext ctx) {
@@ -198,7 +378,14 @@ public class CryptunnelWebSocketHandler extends AbstractWebSocketHandler {
 
     @Override
     protected void handleBinaryMessage(WebSocketSession wsSession, BinaryMessage message) {
+        touch(wsSession);
         log.warn("Cryptunnel: binary message not supported");
+    }
+
+    @Override
+    protected void handlePongMessage(WebSocketSession wsSession, PongMessage message) throws Exception {
+        // Pong 是客户端对心跳的应答——最重要的存活证据，必须刷新静默计时
+        touch(wsSession);
     }
 
     @Override
@@ -209,8 +396,44 @@ public class CryptunnelWebSocketHandler extends AbstractWebSocketHandler {
 
     @Override
     public void handleTransportError(WebSocketSession wsSession, Throwable exception) {
-        log.error("Cryptunnel: WS transport error", exception);
+        if (isPeerDisconnect(exception)) {
+            // 客户端进程退出 / 网络中断 / NAT 回收时，TCP 直落而没有 WS close 握手，
+            // Tomcat 读线程抛 EOFException。这是断开的正常形态而非故障——
+            // 记 ERROR + 全栈会让每一次正常断开都像事故（本次修复要消灭的噪音）。
+            log.info("Cryptunnel: WS peer disconnected without close handshake, sessionId={}",
+                    wsSession.getId());
+        } else {
+            log.error("Cryptunnel: WS transport error, sessionId={}", wsSession.getId(), exception);
+        }
         cleanup(wsSession);
+    }
+
+    /**
+     * 判断传输错误是否属于「对端直落 TCP」的正常断开形态。
+     *
+     * <p>判定依据是 Tomcat NIO 读线程在这类场景下的稳定表现：EOFException（FIN）、
+     * ClosedChannelException、以及消息含 connection reset / broken pipe 的
+     * IOException（RST）。同时穿透 cause 链——容器可能在外面再包一层。</p>
+     */
+    static boolean isPeerDisconnect(Throwable t) {
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur instanceof EOFException || cur instanceof ClosedChannelException) {
+                return true;
+            }
+            String msg = cur.getMessage();
+            if (msg != null) {
+                String lower = msg.toLowerCase(Locale.ROOT);
+                if (lower.contains("connection reset")
+                        || lower.contains("broken pipe")
+                        || lower.contains("connection aborted")) {
+                    return true;
+                }
+            }
+            if (cur.getCause() == cur) {
+                break; // 防御自引用 cause 的死循环
+            }
+        }
+        return false;
     }
 
     /**
@@ -226,6 +449,9 @@ public class CryptunnelWebSocketHandler extends AbstractWebSocketHandler {
      */
     private void cleanup(WebSocketSession wsSession) {
         String sessionId = wsSession.getId();
+
+        // 0) 摘除心跳跟踪：断开后不应再计入静默时长，也不再接收 Ping
+        heartbeats.remove(sessionId);
 
         // 1) 摘除会话：remove 返回非 null 的那一次才真正持有 socket 与 target
         SessionContext ctx = sessions.remove(sessionId);

@@ -198,7 +198,7 @@ cryptunnel-spring-boot-starter/                  # 父 POM
   <version>1.0.0</version>
 </parent>
 <artifactId>cryptunnel-starter-javax</artifactId>
-<!-- version 继承自 parent：1.0.0 -->
+<!-- version 继承自 parent：1.1.0 -->
 <dependencies>
   <dependency>
     <groupId>io.github.objectyan</groupId>

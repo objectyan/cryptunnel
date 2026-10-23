@@ -44,6 +44,31 @@ public class CryptunnelProperties {
     private int connectTimeout = 10000;
     private int readTimeout = 0;
 
+    /**
+     * WS 心跳间隔（毫秒）。私有调度器按此周期向所有已建立会话发送 Ping 帧。
+     *
+     * <p><b>为什么需要它</b>：隧道空闲时（DBeaver 连接池闲置、长时间不查询），
+     * NAT / 防火墙 / WAF 的空闲映射过期会直接掐断链路——两侧都收不到任何通知，
+     * 服务端表现为一次莫名的 {@code EOFException}。Ping/Pong 是应用层保活，
+     * 比 TCP keepalive（默认约 2 小时才探知）快几个数量级，且能穿透按会话保活的
+     * 中间设备。</p>
+     *
+     * <p>0 = 关闭心跳。默认 30 秒：小于常见 NAT 空闲超时（60 秒起步）的一半。</p>
+     */
+    private int heartbeatInterval = 30000;
+
+    /**
+     * WS 死链路回收阈值（毫秒）：超过此时间未收到任何入站帧（数据 / Pong / Close）
+     * 的会话被视为死链路，服务端主动关闭并释放 MySQL 连接与连接计数。
+     *
+     * <p><b>为什么需要它</b>：NAT 静默丢包时 FIN 永远不会到，TCP keepalive 要约
+     * 2 小时才放弃。这期间会话一直占着 {@code maxConnections}（默认 5）槽位和
+     * 一条 MySQL 连接——僵尸槽位累积到上限后，新连接会被全部拒绝，直到重启。</p>
+     *
+     * <p>0 = 关闭回收（仍发 Ping）。默认 5 分钟，即容忍连续 10 个心跳周期无响应。</p>
+     */
+    private int heartbeatTimeout = 300000;
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
@@ -82,6 +107,12 @@ public class CryptunnelProperties {
 
     public int getReadTimeout() { return readTimeout; }
     public void setReadTimeout(int readTimeout) { this.readTimeout = readTimeout; }
+
+    public int getHeartbeatInterval() { return heartbeatInterval; }
+    public void setHeartbeatInterval(int heartbeatInterval) { this.heartbeatInterval = heartbeatInterval; }
+
+    public int getHeartbeatTimeout() { return heartbeatTimeout; }
+    public void setHeartbeatTimeout(int heartbeatTimeout) { this.heartbeatTimeout = heartbeatTimeout; }
 
     /**
      * 单个 target 的配置项。

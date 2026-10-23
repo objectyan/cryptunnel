@@ -2,7 +2,11 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.1.0] - 2026-10-23
+
+> 服务端 `io.github.objectyan` **1.1.0** 与客户端 **0.1.7** 同批发布。
+> 本段同时收录此前 1.0.0（2026-09-14，groupId 迁移后的首次 Central 发布）的内容——
+> 那次发布直接取自初始导入，没有留下版本段，故 1.1.0 是本仓库第一份可对照的发布说明。
 
 ### 新增
 
@@ -101,6 +105,8 @@
 | `build/verify/UiVerify` | 25 | 项目编辑器运行时构造、下拉内容、回填归一、提示文案、监听地址与非回环授权 |
 | `dotnet/build/parity` | 52 + 3 | 双向跨语言字节级对齐（改造后仍与 Java 服务端兼容） |
 | `cryptunnel-core` 单元测试 | 79 | 认证编解码、target 发现、三算法、帧读取、nonce、容量核算；JDK 8 与 JDK 17 两 profile 同数 |
+| `cryptunnel-starter-*` 单元测试 | 9 | WS 心跳发送、静默会话回收、Pong 续命、发送失败释放、传输错误分类、容量超限与认证失败的 close reason 区分；javax / jakarta 双份同数 |
+| `cryptunnel-{tunnel,crypto,app}` 单元测试 | 51 / 2 / 9 | Rust 客户端：HTTP 状态码分类（含 5xx）、认证与重连、帧编解码、跨语言字节对齐、托盘 DPI 定位 |
 | `docs/.rename-protect-selftest.py` | 11 | 改名规则的历史字符串保护，含 3 项变异验证（摘掉规则后必须失败） |
 
 > `FramingVerify` 的 close reason 覆盖比对**曾因改名连带事故退化为 SKIP**（134 项 + 1 跳过）：
@@ -153,6 +159,41 @@
   已补齐反斜杠形态与服务端类名保护，并新增 `docs/.rename-protect-selftest.py`（11 项，
   含 3 项**变异验证** —— 摘掉新补的保护规则后样本必须被改坏，否则说明测试本身是空转）
   与 `docs/.rename-idempotence-check.py`（全仓幂等核查，按文件豁免并校验处数，处数漂移即报警）。
+- **WS 通道无心跳：空闲链路被中间设备掐断后服务端只留一条 `EOFException`，且僵尸会话占满 `max-connections`**
+  （javax / jakarta 双份对称）。两个真实故障模式：
+  1. 隧道空闲时（DBeaver 连接池闲置、长时间不查询），NAT / 防火墙 / WAF 的空闲映射过期会直接掐断链路，
+     两侧都收不到任何通知，服务端表现为一次莫名的 `EOFException`；
+  2. NAT 静默丢包时 FIN 永远不会到，会话要等 TCP keepalive（默认约 2 小时）才释放 ——
+     这期间一直占着 `max-connections`（默认 5）槽位与一条 MySQL 连接，累积到上限后新连接全部被拒，
+     表象是「重启就好」，与连接计数漂移那次故障的症状相同。
+  修法：
+  - 私有守护调度器按 `heartbeat-interval`（默认 30s）向所有已建立会话发 Ping。现役客户端基于 tungstenite，
+    收到 Ping **自动排队 Pong 应答**（源码注释明确 "you should not respond to ping frames manually"），
+    故保活链路客户端零改动即成立；
+  - 超过 `heartbeat-timeout`（默认 5 分钟）未收到任何入站帧（数据 / Pong / Close）的会话，
+    以 `SESSION_NOT_RELIABLE` 主动关闭并走统一 `cleanup()` 释放 MySQL 与计数；Ping 发送失败同样立即释放，
+    不再依赖 TCP keepalive 的慢速探知；
+  - `handleTransportError` 对 `EOFException` / `ClosedChannelException` / connection reset / broken pipe
+    降为 INFO 且不打栈 —— 这是客户端进程退出、网络切换的正常断开形态，原实现把每次正常断开都记成
+    ERROR + 全栈，让正常事件看起来像事故，也淹没了真正的传输错误（判定会穿透 cause 链）。
+  两个配置项均挂在 `cryptunnel.` 下，0 表示关闭；`heartbeat-interval: 0` 时心跳与回收一起停用。
+  心跳调度同样**不使用 `@EnableScheduling`**（理由同 HTTP 陈旧会话清理器），并照抄其两条工程约束：
+  任务捕获 `Throwable`（否则一次异常会让心跳永久静默），线程为守护线程（绝不阻止 JVM 退出）。
+- **容量超限被误报成「认证失败」**（javax / jakarta 双份对称，WS 与 HTTP 两个通道）：
+  `TargetCapacityExceededException` 与 `AuthFailedException` 共用 `NOT_ACCEPTABLE("Auth failed")` / HTTP 401，
+  客户端据此显示「认证失败」，用户便去核对密钥 —— 而真实原因是 target 的 `maxConnections`（默认 5）已满，
+  正确处置是关掉空闲会话或调大上限。这也违反契约 §6（容量超限应为 WS 1013 / HTTP 503）。
+  实测症状：健康检查（真实走完 WS 认证 + MySQL 握手）刚通过 5 秒，新的隧道连接就「认证失败」，
+  HTTP 降级同样 401 —— 密钥错、时钟偏、nonce 重放都不可能同时满足这两条。
+  修法：
+  - WS：容量超限改发 `SERVICE_OVERLOAD`（1013；Spring 对 1013 的常量名，契约里称 SERVICE_UNAVAILABLE）
+    + reason `Max connections exceeded` —— 复用全局上限的文案，客户端已有「连接数已达上限、可重试」的中文映射，
+    客户端无需升级即可获得正确提示；
+  - HTTP：容量超限返回 503（原为 401）；
+  - 客户端 HTTP 侧补 5xx 识别：原先只认 `starts_with('4')`，503 会落进「HTTP 连接响应格式错误」分支，
+    反而比直接显示状态码更难排查；同时把 503 翻译成「服务端连接数已达上限，请关闭空闲会话或调大配置」；
+  - 服务端日志随之可区分：`target capacity exceeded, target=...` 与 `auth failed, reason=...`。
+  认证阶段的三条失败路径收敛到唯一出口 `handleAuthFailure`，避免下次新增异常类型时又漏掉映射。
 
 ### 重构与更名
 

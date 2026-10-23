@@ -152,7 +152,11 @@ public class CryptunnelHttpController {
             System.arraycopy(buf, 0, handshake, 0, n);
             String encryptedHs = AesUtil.encrypt(handshake, aes, mac);
             return ResponseEntity.ok(connId + ":" + encryptedHs);
-        } catch (AuthFailedException | TargetCapacityExceededException e) {
+        } catch (TargetCapacityExceededException e) {
+            // 契约 §6：容量超限是 503。用 401 会让客户端把「服务端满了」误判成「密钥错了」
+            log.warn("Cryptunnel HTTP: target capacity exceeded, target={}", e.getTargetId());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("Max connections exceeded");
+        } catch (AuthFailedException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Auth failed: " + e.getMessage());
         } catch (Exception e) {
             log.error("Cryptunnel HTTP: connect failed", e);

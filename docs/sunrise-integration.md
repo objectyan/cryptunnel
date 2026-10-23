@@ -28,7 +28,7 @@
 <dependency>
     <groupId>io.github.objectyan</groupId>
     <artifactId>cryptunnel-starter-javax</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
 </dependency>
 ```
 
@@ -60,6 +60,10 @@ cryptunnel:
   auth-time-window: 300
   ws-path: /ws-cryptunnel
 
+  # WS 保活与死链路回收（可选，下列为默认值）
+  heartbeat-interval: 30000           # 心跳间隔（毫秒），0 = 关闭心跳
+  heartbeat-timeout: 300000           # 超过此时间无任何入站帧即回收会话（毫秒），0 = 只发 Ping 不回收
+
   targets:
     cloudcc-prod:
       display-name: CloudCC MySQL（dev）
@@ -84,6 +88,26 @@ cryptunnel:
 ### 4.3 最小迁移（不改变行为，零风险）
 
 如果你只想验证 starter 接入正确，**不动 yml** 也行：starter 会自动把平铺配置包装为名为 `default` 的 target，行为与现 sunrise 完全一致。等 starter 跑稳后再改成 targets 形态。
+
+### 4.4 WS 心跳（默认开启，通常不用配）
+
+starter 会起一个私有守护线程，按 `heartbeat-interval` 向所有已建立会话发 WebSocket Ping。目的有两个：
+
+1. **保活**：隧道空闲时（DBeaver 连接池闲置、长时间不查询），NAT / 防火墙 / WAF 的空闲映射过期会直接掐断链路，两侧都收不到通知。30 秒一次的 Ping/Pong 足以刷新映射。
+2. **回收僵尸会话**：NAT 静默丢包时 FIN 永远不会到，会话要等 TCP keepalive（约 2 小时）才释放，这期间一直占着 `max-connections` 槽位和一条 MySQL 连接。超过 `heartbeat-timeout` 没有任何入站帧（数据 / Pong / Close）的会话会被主动关闭并释放。
+
+客户端无需改动：现役客户端基于 tungstenite，收到 Ping 会自动回 Pong。
+
+> 断线日志说明：客户端进程退出、网络切换时，TCP 直落而没有 WS close 握手，服务端会收到一次 `EOFException`。这类断开现在记 INFO（不打栈），不再刷 ERROR。
+
+**排查「认证失败」时先看服务端日志。** 两条 WARN 的含义完全不同：
+
+| 服务端日志 | 含义 | 处置 |
+|---|---|---|
+| `auth failed, sessionId=..., reason=...` | 密钥 / 时间窗 / nonce 真有问题 | 按 reason 改配置 |
+| `target capacity exceeded, target=...` | 该 target 的 `max-connections` 已满 | 关掉空闲会话，或调大 `max-connections`（DBeaver 多标签会各占一条） |
+
+客户端在容量超限时会显示「服务端连接数已达上限」并自动重试，不再误报为认证失败。
 
 ## 5. application-prod.yml 改造
 

@@ -260,7 +260,7 @@ env -u HTTPS_PROXY -u HTTP_PROXY \
 <dependency>
   <groupId>io.github.objectyan</groupId>
   <artifactId>cryptunnel-starter-javax</artifactId>
-  <version>1.0.0</version>
+  <version>1.1.0</version>
 </dependency>
 ```
 
