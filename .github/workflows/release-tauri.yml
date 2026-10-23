@@ -46,7 +46,11 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
+      # fetch-depth: 0 —— 后面要从**标签对象**里取注释当发布正文，浅克隆（默认 depth=1）
+      # 取不到 annotated tag 的 message，正文会静默变成空。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Resolve version from tag
         shell: bash
@@ -135,11 +139,27 @@ jobs:
           fi
           echo "collected $n files"
 
+      # Release 正文取自标签注释（git tag -a v0.1.7 -m "..."），否则 body 为空：
+      # latest.json 的 notes 会退化成「Cryptunnel vX.Y.Z 发布」，用户点更新只看得到这一句。
+      # 用 %(contents) 而非 %(contents:subject) 保留多行说明。
+      - name: Extract release notes from tag
+        shell: bash
+        run: |
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > release-notes.md
+          # 取不到注释时不能留空文件：latest.json 的 notes 会跟着变空，更新弹窗没有内容。
+          if [ ! -s release-notes.md ]; then
+            echo "Cryptunnel v$VERSION" > release-notes.md
+            echo "::warning::标签 $GITHUB_REF_NAME 没有注释，发布正文用兜底文案"
+          fi
+          echo "--- release-notes.md ---"
+          cat release-notes.md
+
       - name: Upload Release assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Cryptunnel v${{ env.VERSION }}
+          body_path: release-notes.md
           draft: true
           prerelease: false
           fail_on_unmatched_files: true
