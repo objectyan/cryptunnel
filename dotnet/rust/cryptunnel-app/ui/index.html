@@ -141,6 +141,12 @@
                 <option value="sm4-cbc-hmac-sha256">sm4-cbc-hmac-sha256</option>
               </select>
             </label>
+            <label>目标数据库 dbType
+              <select id="e-dbtype">
+                <option value="mysql" selected>mysql（默认）</option>
+                <option value="postgres">postgres（PostgreSQL）</option>
+              </select>
+            </label>
             <label>目标 targetId（可空）<input id="e-target" placeholder="缺省 target" /></label>
             <label>监听地址 local.address<input id="e-address" value="127.0.0.1" /></label>
             <label>WebSocket 路径 wsPath<input id="e-wspath" placeholder="/ws-cryptunnel" /></label>

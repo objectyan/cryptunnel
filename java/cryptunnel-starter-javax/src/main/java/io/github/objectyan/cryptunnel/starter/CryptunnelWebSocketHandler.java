@@ -10,6 +10,7 @@ import io.github.objectyan.cryptunnel.core.tunnel.AuthenticatedSession;
 import io.github.objectyan.cryptunnel.core.tunnel.AuthenticatedSessionManager;
 import io.github.objectyan.cryptunnel.core.tunnel.DefaultAuthenticatedSessionManager;
 import io.github.objectyan.cryptunnel.core.tunnel.MySqlConnection;
+import io.github.objectyan.cryptunnel.core.tunnel.ReaderShutdown;
 import io.github.objectyan.cryptunnel.core.tunnel.TargetCapacityExceededException;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
@@ -280,6 +281,30 @@ public class CryptunnelWebSocketHandler extends AbstractWebSocketHandler {
             // 3) 记录会话绑定的 target（后续数据通道用此 target 的密钥）
             sessions.put(wsSession.getId(), new SessionContext(session.mysql(), target));
 
+            // 3.5) 推送认证 ACK（空数据帧）——ADR-0005。
+            //
+            // 为什么需要：服务端「认证通过后不发 ACK，靠目标库的首个数据帧当认证信号」
+            // 这一约定，隐含假设了「目标库会主动说话」——MySQL 会（greeting），
+            // PostgreSQL 不会（它等客户端先发 StartupMessage）。没有 ACK 时，
+            // PG 场景下客户端永远等不到「认证成功」，双方死锁。
+            //
+            // 为什么是空帧：解密后长度为 0 即可与真实数据帧区分；且老客户端本来就有
+            // `if (!first_frame.is_empty())` 判断（空帧不转给本地），因此**新服务端对
+            // 老客户端完全兼容**——MySQL 场景下 ACK 被跳过，greeting 由数据泵照常转发。
+            try {
+                SecretKeySpec ackAes = AesUtil.deriveAesKey(target.getAesKey());
+                SecretKeySpec ackMac = AesUtil.deriveHmacKey(target.getAesKey());
+                String ack = AesUtil.encrypt(new byte[0], ackAes, ackMac);
+                synchronized (wsSession) {
+                    if (wsSession.isOpen()) {
+                        wsSession.sendMessage(new TextMessage(ack));
+                    }
+                }
+            } catch (Exception e) {
+                // ACK 发不出去不影响后续数据流：客户端会靠 close 帧判定失败。
+                log.warn("Cryptunnel: auth ack send failed, sessionId={}", wsSession.getId(), e);
+            }
+
             // 4) 启动 reader 线程
             final TargetDefinition boundTarget = target;
             final AuthenticatedSession boundSession = session;
@@ -367,7 +392,13 @@ public class CryptunnelWebSocketHandler extends AbstractWebSocketHandler {
                 }
             }
         } catch (Exception e) {
-            if (!Thread.currentThread().isInterrupted()) {
+            // 客户端先断开时，cleanup() 会关闭 MySQL socket，reader 阻塞中的 read 随之抛
+            // SocketException("Socket closed") —— 这是关闭顺序的必然产物，不是故障。
+            // 记 ERROR + 全栈会让每一次正常断开都像事故（handleTransportError 已治理过
+            // 同类形态，这里补上另一处遗漏）。判定见 core 的 ReaderShutdown。
+            if (ReaderShutdown.isNoise(e, socket.isClosed(), wsSession.isOpen())) {
+                log.info("Cryptunnel: reader stopped (session closed), sessionId={}", wsSession.getId());
+            } else if (!Thread.currentThread().isInterrupted()) {
                 log.error("Cryptunnel: reader error, sessionId={}", wsSession.getId(), e);
             }
         } finally {

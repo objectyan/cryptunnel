@@ -68,4 +68,20 @@ public class AesUtilTest {
         // 密钥字节不同（不同前缀域分离）
         assertNotEquals(new String(a.getEncoded()), new String(b.getEncoded()));
     }
+
+    /**
+     * 空明文的加解密往返——服务端「认证确认帧（ACK）」机制的核心不变式（ADR-0005）。
+     *
+     * <p>ACK 帧用「解密后长度为 0」与真实数据帧区分：客户端据此判定「服务端认证已过」；
+     * 而老客户端的 {@code if (!first_frame.is_empty())} 会把它跳过，对老客户端零影响。</p>
+     */
+    @Test
+    public void emptyPayload_roundTripsToEmpty() {
+        SecretKeySpec aes = AesUtil.deriveAesKey("raw-key");
+        SecretKeySpec mac = AesUtil.deriveHmacKey("raw-key");
+        String enc = AesUtil.encrypt(new byte[0], aes, mac);
+        assertNotNull(enc);
+        byte[] plain = AesUtil.decrypt(enc, aes, mac);
+        assertTrue("ACK 帧解密后必须为空", plain.length == 0);
+    }
 }

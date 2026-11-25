@@ -198,8 +198,8 @@ pub async fn probe(cfg: &TunnelConfig) -> HealthReport {
     ));
 
     // ---------- 第 2、3 层：认证 + 数据库 ----------
-    // 这两层无法拆开单独计时：服务端认证通过后不发 ACK，而是直接去连 MySQL、
-    // 再把 MySQL 握手包推过来（CryptunnelWebSocketHandler）。客户端能观察到的
+    // 这两层无法拆开单独计时：服务端认证通过后推一个**空确认帧**，随后才连目标库
+    // 并把目标库的首个数据帧推过来（CryptunnelWebSocketHandler）。客户端能观察到的
     // 只有「收到了第一个数据帧」这一个事件 —— 认证成功的时刻在线路上没有任何
     // 可观测的信号。所以认证层记为通过且耗时记 0，把这段等待全部计入数据库层，
     // 宁可让一层的耗时偏大，也不能凭空编一个认证耗时（那个数字会被用来做性能判断）。
@@ -302,13 +302,47 @@ async fn probe_auth_and_database(
                 None,
             ));
             let version = parse_mysql_version(&handshake);
-            let detail = match &version {
-                Some(v) => format!("服务端已连接 MySQL（版本 {v}），握手包 {} 字节", handshake.len()),
-                None => format!("服务端已连接 MySQL，握手包 {} 字节（版本号未解析出）", handshake.len()),
-            };
-            stages.push(stage("数据库", HealthStatus::Pass, elapsed, detail, None));
-            let _ = write.send(Message::Close(None)).await;
-            (stages, version)
+            // 数据库层按目标库类型给结论（ADR-0005）。
+            match cfg.db_type {
+                crate::config::DbType::Postgres => {
+                    // PG 的第一个有意义的包是 Authentication 请求，而它必须先有
+                    // StartupMessage（要用户名）——凭据在客户端本地由驱动使用，探活拿不到。
+                    // 故探活最多验到「链路 + 服务端认证 + 目标库可达」，
+                    // 数据库层记 Skipped（不是 Fail——不是失败，是无法判定）。
+                    stages.push(stage(
+                        "数据库",
+                        HealthStatus::Skipped,
+                        elapsed,
+                        "已收到服务端认证确认，目标库可达；但 PostgreSQL 的认证需要客户端凭据，\
+                         探活无法验证数据库层（版本号亦不可探测）"
+                            .into(),
+                        None,
+                    ));
+                    let _ = write.send(Message::Close(None)).await;
+                    (stages, None)
+                }
+                crate::config::DbType::MySql => {
+                    let detail = if handshake.is_empty() {
+                        // 新服务端的认证确认帧是空的，真正的握手包在下一帧；
+                        // 探活只等一帧，故版本号解析不出——**结论不受影响**（仍为 Pass）。
+                        "服务端已确认连接（认证确认帧），版本号未随确认帧下发".to_string()
+                    } else {
+                        match &version {
+                            Some(v) => format!(
+                                "服务端已连接 MySQL（版本 {v}），握手包 {} 字节",
+                                handshake.len()
+                            ),
+                            None => format!(
+                                "服务端已连接 MySQL，握手包 {} 字节（版本号未解析出）",
+                                handshake.len()
+                            ),
+                        }
+                    };
+                    stages.push(stage("数据库", HealthStatus::Pass, elapsed, detail, None));
+                    let _ = write.send(Message::Close(None)).await;
+                    (stages, version)
+                }
+            }
         }
         Ok(Err(msg)) => {
             stages.push(stage(

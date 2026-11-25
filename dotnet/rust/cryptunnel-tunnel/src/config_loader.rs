@@ -202,6 +202,14 @@ pub fn validate_project_fields(pf: &ProjectFile) -> Result<(), String> {
     }
     let cipher_raw = pf.cipher.as_deref().unwrap_or("");
     crate::registry::normalize(cipher_raw).map_err(|e| e.to_string())?;
+
+    // dbType：写错没有协商余地——健康检查会按类型发不同的探测包，
+    // 填错等于用错误的协议去探库。加载即拒绝，不静默回落。
+    if let Some(db_raw) = pf.db_type.as_deref() {
+        if crate::config::DbType::parse(db_raw).is_none() {
+            return Err(format!("dbType={db_raw} 非法（可选 mysql / postgres）"));
+        }
+    }
     Ok(())
 }
 
@@ -385,6 +393,14 @@ fn resolve(
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty());
 
+    // dbType：未声明 = MySQL（老配置零变化、行为完全不变）。
+    // 未知值在此直接拒绝——健康检查会按类型发不同的探测包，填错等于用错协议探库。
+    let db_type = match r.db_type.as_deref() {
+        None => crate::config::DbType::MySql,
+        Some(raw) => crate::config::DbType::parse(raw)
+            .ok_or_else(|| format!("dbType={raw} 非法（可选 mysql / postgres）"))?,
+    };
+
     Ok(TunnelConfig {
         name: name.clone(),
         display_name: r.display_name.clone().unwrap_or_else(|| name.clone()),
@@ -418,6 +434,7 @@ fn resolve(
         chunk_size: chunk_size_i64 as usize,
         cipher,
         target_id,
+        db_type,
     })
 }
 

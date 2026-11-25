@@ -5,8 +5,11 @@
 //! 协议要点（与服务端 `CryptunnelWebSocketHandler` 对齐）：
 //! - **一个 WS 连接 = 一个 MySQL 连接**（非多路复用），每个本地 TCP 连接开独立 WS。
 //! - 首帧必须是**加密后**的认证报文，服务端对明文 `AUTH:` 前缀直接拒绝。
-//! - 认证成功**不发任何 ACK**，直接开 MySQL 连接、由 reader 线程把握手包推过来。
-//!   所以收到数据 = 认证已过，首帧（MySQL 握手包）必须回传给 DBeaver。
+//! - 认证成功后服务端**先推一个空 ACK 帧**（解密后长度 0），随后开目标库连接、
+//!   由 reader 线程把数据库首帧推过来。收到 ACK = 认证已过；空 ACK 不回传本地，
+//!   数据库首帧（如 MySQL greeting）必须回传给 DBeaver。
+//!   空 ACK 是为 PostgreSQL 加的（PG 等客户端先发 StartupMessage，不会主动说话）；
+//!   老服务端不发 ACK 仍可对接——客户端把收到的首个非空帧当握手包即可。
 //! - 只用 **Text** 帧（服务端 `handleBinaryMessage` 仅 warn 丢弃）。
 //! - 认证失败表现为服务端 close 帧，reason 文本经 [`crate::close_reason`] 映射为中文。
 //!
@@ -253,33 +256,73 @@ async fn try_websocket(
         return Ok(false);
     }
 
-    // 等待并判定认证结果。成功的信号是服务端推来的首个数据帧（MySQL 握手包），
+    // 拆本地连接并**立即**启动上行泵（ADR-0005）。
+    //
+    // 为什么必须提前：MySQL 是「服务端先 greeting，客户端后回 auth packet」，
+    // 而 PostgreSQL 是「客户端先 StartupMessage，服务端后回 Authentication」。
+    // 上行泵若等到认证结果之后才启动，PG 场景下 DBeaver 的第一个包发不出去，
+    // PG 又不会主动发字节（它等客户端先说话）→ 双向死锁。
+    //
+    // 但**读要早、发要晚**——两个约束同时成立才安全：
+    //  ① 读要早：否则 PG 的 StartupMessage 发不出去（同上）；
+    //  ② 发要晚：服务端处理完 AUTH 之前，若收到第二个帧会把它**再当 AUTH 解析一遍**，
+    //     必然解析失败 → 「认证成功」被误判成「认证报文格式错误」。
+    // 所以：泵提前启动读本地，发送前等认证闸门放行。
+    //
+    // 对 MySQL 无副作用：JDBC 驱动在收到 server greeting 之前不会发送任何字节。
+    // 认证失败时已发出的数据也不会被转发——服务端认证失败直接 close WS，
+    // 未认证的数据永远进不了目标库。
+    let (mut rd, mut wr) = tokio::io::split(client);
+    let (auth_gate_tx, auth_gate_rx) = tokio::sync::watch::channel(false);
+    let mut local_to_ws = Box::pin(pump_local_to_ws(
+        &mut rd,
+        &mut write,
+        cfg,
+        cipher,
+        sink,
+        auth_gate_rx,
+    ));
+
+    // 等待并判定认证结果。成功的信号是服务端推来的首个数据帧（目标库的握手包），
     // 失败表现为 close 帧（reason 映射为中文）。不能 sleep 后查状态——那样会丢 reason。
-    let first_frame = match await_auth_result(&mut read, cfg, cipher, sink).await? {
-        AuthOutcome::Success(frame) => frame,
-        AuthOutcome::Failed => return Ok(false),
+    //
+    // 与上行泵并发：任一先结束就按其收尾——本地先断 = DBeaver 放弃这次连接。
+    let first_frame = tokio::select! {
+        outcome = await_auth_result(&mut read, cfg, cipher, sink) => match outcome? {
+            AuthOutcome::Success(frame) => frame,
+            AuthOutcome::Failed => return Ok(false),
+        },
+        _ = &mut local_to_ws => {
+            // 本地连接在认证结果出来前就断了（DBeaver 放弃/超时）
+            return Ok(true);
+        }
     };
 
     log(LogLevel::Info, "WebSocket 加密认证成功".to_string());
     emit(TunnelEvent::State(TunnelState::WsConnected));
 
-    // 首帧（MySQL 握手包）必须回传给 DBeaver，丢掉它 DBeaver 会一直等握手而超时。
+    // 认证成功 → 放行本地数据（闸门见上面的说明）。
+    let _ = auth_gate_tx.send(true);
+
+    // 首帧（目标库的握手包）必须回传给 DBeaver，丢掉它 DBeaver 会一直等握手而超时。
+    // 注意写入走 wr（本地连接的写半）——client 已被 tokio::io::split 消费。
     if !first_frame.is_empty() {
         emit(TunnelEvent::Bytes(Direction::In, first_frame.len()));
-        if let Err(e) = client.write_all(&first_frame).await {
+        if let Err(e) = wr.write_all(&first_frame).await {
             log(LogLevel::Warn, format!("写入握手包失败：{e}"));
             return Ok(true);
         }
     }
 
     // 双向泵：WS→本地、本地→WS，任一结束即收尾。
-    let (mut rd, mut wr) = tokio::io::split(client);
     let ws_to_local = pump_ws_to_local(&mut read, &mut wr, cipher, &cfg.aes_key, sink);
-    let local_to_ws = pump_local_to_ws(&mut rd, &mut write, cfg, cipher, sink);
     tokio::select! {
         _ = ws_to_local => {}
-        _ = local_to_ws => {}
+        _ = &mut local_to_ws => {}
     }
+    // 上行泵持有 &mut write；显式结束它的借用，再关闭 WS。
+    // 不 drop 也能靠 NLL 推导，但把生命周期写明白可避免编译器版本差异。
+    drop(local_to_ws);
     // 优雅关闭 WS（忽略错误）。
     let _ = write.send(Message::Close(None)).await;
     Ok(true)
@@ -442,12 +485,15 @@ async fn pump_ws_to_local(
 }
 
 /// 上行泵：本地（DBeaver）→ 加密 → WS。
+///
+/// **认证闸门**：认证成功前只读不发。调用处有完整理由（读要早、发要晚）。
 async fn pump_local_to_ws(
     local: &mut tokio::io::ReadHalf<&mut TcpStream>,
     write: &mut futures_util::stream::SplitSink<WsStream, Message>,
     cfg: &TunnelConfig,
     cipher: &Arc<dyn TunnelCipher>,
     sink: &EventSink,
+    mut auth_gate: tokio::sync::watch::Receiver<bool>,
 ) {
     let mut buf = vec![0u8; cfg.chunk_size];
 
@@ -458,6 +504,19 @@ async fn pump_local_to_ws(
             Err(_) => break,
         };
         let chunk = &buf[..n];
+
+        // 认证闸门：未放行前只读不发。发送端被丢弃 = 连接已在收尾，直接结束。
+        //
+        // ⚠️ 这里必须先把 borrow 结果落到独立语句里：`if` 条件中创建的临时值
+        // （watch::Ref）生命周期会延伸到整个 if 块，而 changed() 需要 &mut self
+        // → 直接写在条件里会借用冲突、编译不过。
+        let gate_open = *auth_gate.borrow();
+        if !gate_open {
+            if auth_gate.changed().await.is_err() {
+                break;
+            }
+        }
+
         (sink)(TunnelEvent::Bytes(Direction::Out, n));
 
         let enc = cipher.seal(chunk, &cfg.aes_key);

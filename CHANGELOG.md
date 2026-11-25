@@ -2,6 +2,25 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.1.9] - 2026-11-25
+
+> 客户端 + 服务端配套发版：新增 PostgreSQL 支持（ADR-0005）。PG 场景两端必须同时升级；
+> MySQL 场景所有旧版本组合不受影响。服务端 `java-v1.1.2` 同步发布到 Maven Central。
+
+### 新增
+
+- **PostgreSQL 支持**：配置新增 `dbType`（`mysql` 默认 / `postgres`），编辑器加下拉选择。
+  握手编排解耦——服务端认证成功后推空 ACK 帧，客户端上行泵提前启动并用认证闸门实现
+  「读早、发晚」，解开 PG「客户端先发 StartupMessage」与旧编排的双向死锁。
+- **健康检查按 dbType 分支**：PG 的数据库层记 Skipped（认证需客户端凭据，探活无法验证）。
+
+### 修复
+
+- **dbType 配置被静默吞掉**：UI 保存与 YAML 回写此前都不含 `dbType`，手写 `dbType: postgres`
+  在界面改任意字段后即丢失。现已补齐回写、下拉与回填契约断言。
+- **正常断连误记 ERROR**：reader 线程遇 `SocketException("Socket closed")` 现判定为收尾噪音记 INFO，
+  真故障仍保留 ERROR。
+
 ## [0.1.8] - 2026-10-23
 
 > 仅客户端改动，服务端无需配合升级（Central 当前版本为 1.1.1）。

@@ -33,6 +33,40 @@ impl Default for TransportMode {
 /// 而该错误无法与 aesKey 配错相区分。
 pub const DEFAULT_CIPHER: &str = "aes-256-cbc-hmac-sha256";
 
+/// 目标数据库类型。
+///
+/// 决定两件事：健康检查的探测方式，以及日志/错误文案里的数据库称呼。
+/// **不改变隧道数据面**——数据面本来就是协议无关的字节透传（ADR-0005）。
+///
+/// 配置里不写这一项时默认 [`DbType::MySql`]：老配置零变化、行为完全不变。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DbType {
+    /// MySQL / MariaDB：服务端先 greeting，客户端后回 auth packet。
+    MySql,
+    /// PostgreSQL：客户端先 StartupMessage，服务端后回 Authentication。
+    Postgres,
+}
+
+impl DbType {
+    /// 配置里的规范取值（小写），落盘与日志统一用它。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DbType::MySql => "mysql",
+            DbType::Postgres => "postgres",
+        }
+    }
+
+    /// 解析配置值。未知值返回 `None`，由调用方按「配置错误」拒绝加载——
+    /// 不静默回落：静默回落会让填错的用户以为在走 PG 探测路径、实际仍在按 MySQL 探。
+    pub fn parse(raw: &str) -> Option<DbType> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "mysql" | "mariadb" => Some(DbType::MySql),
+            "postgres" | "postgresql" | "pgsql" => Some(DbType::Postgres),
+            _ => None,
+        }
+    }
+}
+
 /// 隧道运行配置。
 #[derive(Debug, Clone)]
 pub struct TunnelConfig {
@@ -64,6 +98,8 @@ pub struct TunnelConfig {
     pub cipher: String,
     /// 可选具名 target（多数据源白名单）。`None` 走服务端缺省 target。
     pub target_id: Option<String>,
+    /// 目标数据库类型（ADR-0005）。默认 MySql，老配置行为完全不变。
+    pub db_type: DbType,
 }
 
 impl Default for TunnelConfig {
@@ -92,6 +128,7 @@ impl Default for TunnelConfig {
             chunk_size: 4096,
             cipher: DEFAULT_CIPHER.to_string(),
             target_id: None,
+            db_type: DbType::MySql,
         }
     }
 }
@@ -140,6 +177,36 @@ mod tests {
             server_url: url.to_string(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn db_type_defaults_to_mysql() {
+        // 老配置不写 dbType 时必须是 MySQL——行为完全不变（ADR-0005）。
+        assert_eq!(TunnelConfig::default().db_type, DbType::MySql);
+    }
+
+    #[test]
+    fn db_type_parses_known_values() {
+        assert_eq!(DbType::parse("mysql"), Some(DbType::MySql));
+        assert_eq!(DbType::parse("MySQL"), Some(DbType::MySql));
+        assert_eq!(DbType::parse(" mariadb "), Some(DbType::MySql));
+        assert_eq!(DbType::parse("postgres"), Some(DbType::Postgres));
+        assert_eq!(DbType::parse("PostgreSQL"), Some(DbType::Postgres));
+        assert_eq!(DbType::parse("pgsql"), Some(DbType::Postgres));
+    }
+
+    #[test]
+    fn db_type_rejects_unknown_value() {
+        // 未知值必须拒绝而非静默回落：静默回落会让填错的用户以为在走 PG 探测路径，
+        // 实际仍按 MySQL 探——错误被藏起来比报错更糟。
+        assert_eq!(DbType::parse("oracle"), None);
+        assert_eq!(DbType::parse(""), None);
+    }
+
+    #[test]
+    fn db_type_as_str_is_canonical() {
+        assert_eq!(DbType::MySql.as_str(), "mysql");
+        assert_eq!(DbType::Postgres.as_str(), "postgres");
     }
 
     #[test]

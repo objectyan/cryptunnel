@@ -42,7 +42,9 @@ DBeaver ──► 本地代理 ──► WebSocket 隧道 ──► [ 你的 Web
 - **复用宿主端口与证书**：宿主走 HTTPS，隧道自动是 WSS，无需额外申请证书
 - **老客户端零改动**：AUTH 报文的 4 段格式（不带 targetId）继续有效，自动路由到 default target
 - **双 artifact 覆盖 Boot 2 / Boot 3+**：`javax` 与 `jakarta` 两个 starter，源码等价
-- **字节流透传**：不解析 MySQL 协议，由客户端 JDBC 驱动自行完成握手
+- **字节流透传**：隧道不解析任何数据库协议，握手与认证由客户端 JDBC 驱动完成。
+  当前**握手编排按 MySQL 模型实现**（服务端先 greeting、客户端后回应）；
+  PostgreSQL 需新客户端 + 新服务端同时到位，见 [ADR-0005](docs/adr/0005-pluggable-database-type.md)
 
 ---
 

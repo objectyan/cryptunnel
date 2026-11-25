@@ -42,6 +42,9 @@ pub struct ProjectFile {
     pub cipher: Option<String>,
     pub defaults: Option<Box<DefaultsSection>>,
     pub target_id: Option<String>,
+    /// 目标数据库类型（ADR-0005）。线上键名 `dbType`（本结构体是 camelCase）。
+    /// `None` = 未声明 = MySQL，老配置行为完全不变。
+    pub db_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -200,6 +203,17 @@ pub fn build_project_yaml(pf: &ProjectFile) -> String {
         let _ = writeln!(sb, "targetId: {}", yaml_str(tid));
     }
 
+    // dbType：非默认（mysql）必须回写（ADR-0005）。
+    // 若省略，用户手写的 `dbType: postgres` 会在任意一次「改个端口」的 UI 保存后
+    // 被静默吞掉，配置退回 MySQL——健康检查按错协议探测，PG 支持等于不可用。
+    // 未知值原样写回，交给加载期校验拒绝（与 cipher 同策略，不在保存时"帮忙纠正"）。
+    if let Some(db) = pf.db_type.as_deref() {
+        let db = db.trim();
+        if !db.is_empty() && db.to_ascii_lowercase() != "mysql" {
+            let _ = writeln!(sb, "dbType: {db}");
+        }
+    }
+
     let _ = writeln!(sb);
     let _ = writeln!(sb, "local:");
     let port = pf.local.as_ref().and_then(|l| l.port).unwrap_or(0);
@@ -282,6 +296,27 @@ mod tests {
         assert!(y.contains("health:"));
         assert!(y.contains("  enabled: true"));
         assert!(y.contains("  intervalSec: 300"));
+    }
+
+    /// ADR-0005：dbType 必须随配置回写保存。否则用户手写的 `dbType: postgres`
+    /// 在 UI 里改个端口就会丢失，且没有任何提示——PG 支持被静默关闭。
+    #[test]
+    fn yaml_preserves_db_type() {
+        let pf = ProjectFile {
+            schema_version: 1,
+            name: Some("pg-prod".into()),
+            db_type: Some("postgres".into()),
+            ..Default::default()
+        };
+        let y = build_project_yaml(&pf);
+        assert!(y.contains("dbType: postgres"), "回写丢了 dbType：{y}");
+
+        // 默认 mysql 不写，避免给老配置制造无意义 diff。
+        let pf2 = ProjectFile {
+            db_type: Some("mysql".into()),
+            ..pf
+        };
+        assert!(!build_project_yaml(&pf2).contains("dbType:"));
     }
 
     #[test]

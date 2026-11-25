@@ -383,7 +383,7 @@ function openEditor(name) {
       $(id).value = "";
     $("e-name").disabled = false;
     $("e-port").value = 3307; $("e-address").value = "127.0.0.1";
-    $("e-cipher").value = "aes-256-cbc-hmac-sha256"; $("e-mode").value = "";
+    $("e-cipher").value = "aes-256-cbc-hmac-sha256"; $("e-dbtype").value = "mysql"; $("e-mode").value = "";
     $("e-enabled").checked = true; $("e-allownlb").checked = false; $("e-health").checked = false;
     return;
   }
@@ -403,6 +403,7 @@ function openEditor(name) {
     $("e-wspath").value = pf.wsPath || "";
     $("e-httpbase").value = pf.httpBasePath || "";
     $("e-cipher").value = pf.cipher || "aes-256-cbc-hmac-sha256";
+    $("e-dbtype").value = pf.dbType || "mysql";
     $("e-mode").value = (pf.transport && pf.transport.mode) || "";
     $("e-enabled").checked = pf.enabled !== false;
     $("e-allownlb").checked = !!(pf.local && pf.local.allowNonLoopback);
@@ -434,6 +435,7 @@ $("e-save").addEventListener("click", async () => {
     aesKey: $("e-aes").value,
     authKey: $("e-auth").value,
     cipher: $("e-cipher").value,
+    dbType: $("e-dbtype").value,
     targetId: $("e-target").value.trim() || null,
     wsPath: $("e-wspath").value.trim() || null,
     httpBasePath: $("e-httpbase").value.trim() || null,

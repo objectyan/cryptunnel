@@ -68,6 +68,7 @@ enabled: true                # 可选，默认 true；false 则不启动
 serverUrl: https://crm.example.com:8081   # 必填，http/https，末尾不带斜杠
 aesKey: "..."                # 必填，非空
 authKey: "..."               # 必填，非空
+dbType: "mysql"              # 可选，mysql（默认）| postgres；见 ADR-0005
 
 local:
   port: 13306                # 必填，1024-65535，且在项目间唯一
