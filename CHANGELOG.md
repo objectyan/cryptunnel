@@ -2,6 +2,22 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.1.3] - 2026-11-26
+
+> 仅服务端发版（`java-v1.1.3`），客户端 0.1.9 无需改动。生产若仍运行 1.1.1，
+> 必须先升级到本版本，否则不会发认证 ACK，新客户端会在认证层等到超时。
+
+### 修复
+
+- **认证 ACK 被目标库建连阻塞**：1.1.2 虽已补上空 ACK 帧，但它排在
+  `sessionManager.authenticate()` 之后，而该方法内部会 `tunnel.open(target)` 连接目标库。
+  目标库跨网建连慢时 ACK 一起被拖住，客户端健康检查只在认证层报 10000ms 超时，
+  真实故障（目标库不可达）被完全掩盖。现在将 ACK 挂到认证流程的 `beforeTargetConnect`
+  回调上：timestamp / target / authKey / nonce / 容量全部校验通过后立即发送 ACK，
+  再执行可能阻塞的目标库 TCP 连接。回调异常按认证失败处理并回滚已预留的连接槽位。
+- 新增 `EarlyAuthAckTest`（5 项）锁定顺序与失败分支；定点变异验证确认把 ACK 挪回
+  connect 之后会让其中 2 项失败。
+
 ## [0.1.9] - 2026-11-25
 
 > 客户端 + 服务端配套发版：新增 PostgreSQL 支持（ADR-0005）。PG 场景两端必须同时升级；

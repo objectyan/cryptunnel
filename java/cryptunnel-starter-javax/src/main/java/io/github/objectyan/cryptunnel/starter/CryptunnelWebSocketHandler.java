@@ -47,7 +47,7 @@ import org.springframework.web.socket.handler.AbstractWebSocketHandler;
  * <ol>
  *   <li>首条消息：加密的 AUTH 报文 → {@link TargetDiscovery#discover} 逐 target 试解
  *       → 找到对应 target + 解出 AuthMessage → 鉴权</li>
- *   <li>鉴权通过后打开 target MySQL TCP，启动 reader 线程</li>
+ *   <li>鉴权参数通过后先推空 ACK（ADR-0005），再连接 target 数据库、启动 reader 线程</li>
  *   <li>后续消息：加密的 MySQL 协议字节 → 用该 target 密钥解 → 转发</li>
  *   <li>MySQL → WS：reader 线程读取 → 用该 target 密钥加密 → WS send</li>
  * </ol>
@@ -275,38 +275,25 @@ public class CryptunnelWebSocketHandler extends AbstractWebSocketHandler {
             TargetDefinition target = decrypted.target();
             AuthMessage auth = decrypted.auth();
 
-            // 2) 鉴权 + 路由 + 打开 MySQL
-            AuthenticatedSession session = sessionManager.authenticate(auth);
+            // 2) 校验认证参数 →【立即 ACK】→ 才打开目标库 TCP。
+            //
+            // 顺序是本修复的核心：tunnel.open() 是认证路径里唯一可能长阻塞的一步
+            // （跨网建连 / DNS / 防火墙丢包）。ACK 若排在它之后，客户端健康检查只会在
+            // 认证层超时（10000ms），把「目标库连不上」这个真实原因完全掩盖。
+            // 校验、nonce 消费、容量预留都由 authenticate 在回调前完成，提前 ACK
+            // 不会把未认证连接误判为成功。
+            final TargetDefinition boundTarget = target;
+            AuthenticatedSession session = sessionManager.authenticate(auth, new Runnable() {
+                @Override
+                public void run() {
+                    sendAuthAck(wsSession, boundTarget);
+                }
+            });
 
             // 3) 记录会话绑定的 target（后续数据通道用此 target 的密钥）
             sessions.put(wsSession.getId(), new SessionContext(session.mysql(), target));
 
-            // 3.5) 推送认证 ACK（空数据帧）——ADR-0005。
-            //
-            // 为什么需要：服务端「认证通过后不发 ACK，靠目标库的首个数据帧当认证信号」
-            // 这一约定，隐含假设了「目标库会主动说话」——MySQL 会（greeting），
-            // PostgreSQL 不会（它等客户端先发 StartupMessage）。没有 ACK 时，
-            // PG 场景下客户端永远等不到「认证成功」，双方死锁。
-            //
-            // 为什么是空帧：解密后长度为 0 即可与真实数据帧区分；且老客户端本来就有
-            // `if (!first_frame.is_empty())` 判断（空帧不转给本地），因此**新服务端对
-            // 老客户端完全兼容**——MySQL 场景下 ACK 被跳过，greeting 由数据泵照常转发。
-            try {
-                SecretKeySpec ackAes = AesUtil.deriveAesKey(target.getAesKey());
-                SecretKeySpec ackMac = AesUtil.deriveHmacKey(target.getAesKey());
-                String ack = AesUtil.encrypt(new byte[0], ackAes, ackMac);
-                synchronized (wsSession) {
-                    if (wsSession.isOpen()) {
-                        wsSession.sendMessage(new TextMessage(ack));
-                    }
-                }
-            } catch (Exception e) {
-                // ACK 发不出去不影响后续数据流：客户端会靠 close 帧判定失败。
-                log.warn("Cryptunnel: auth ack send failed, sessionId={}", wsSession.getId(), e);
-            }
-
             // 4) 启动 reader 线程
-            final TargetDefinition boundTarget = target;
             final AuthenticatedSession boundSession = session;
             Thread reader = new Thread(new Runnable() {
                 @Override
@@ -320,6 +307,35 @@ public class CryptunnelWebSocketHandler extends AbstractWebSocketHandler {
             log.info("Cryptunnel: auth OK, target={}, sessionId={}", target.getName(), wsSession.getId());
         } catch (Exception e) {
             handleAuthFailure(wsSession, e);
+        }
+    }
+
+    /**
+     * 认证成功后立刻回一帧「空数据」——ADR-0005。
+     *
+     * <p>服务端原本靠目标库首帧当认证信号，隐含假设「目标库会主动说话」：MySQL 会
+     * （greeting），PostgreSQL 不会（它等客户端先发 StartupMessage），没有 ACK 时
+     * PG 场景双方死锁。</p>
+     *
+     * <p>为什么是空帧：解密后长度为 0 即可与真实数据帧区分；老客户端本来就有
+     * {@code if (!first_frame.is_empty())} 判断（空帧不转给本地），因此新服务端对
+     * 老客户端完全兼容——MySQL 场景下 ACK 被跳过，greeting 由数据泵照常转发。</p>
+     *
+     * <p>调用方保证本方法只在认证参数校验通过后执行；ACK 发不出去不影响后续数据流，
+     * 客户端会靠 close 帧判定失败。</p>
+     */
+    private void sendAuthAck(WebSocketSession wsSession, TargetDefinition target) {
+        try {
+            SecretKeySpec ackAes = AesUtil.deriveAesKey(target.getAesKey());
+            SecretKeySpec ackMac = AesUtil.deriveHmacKey(target.getAesKey());
+            String ack = AesUtil.encrypt(new byte[0], ackAes, ackMac);
+            synchronized (wsSession) {
+                if (wsSession.isOpen()) {
+                    wsSession.sendMessage(new TextMessage(ack));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Cryptunnel: auth ack send failed, sessionId={}", wsSession.getId(), e);
         }
     }
 

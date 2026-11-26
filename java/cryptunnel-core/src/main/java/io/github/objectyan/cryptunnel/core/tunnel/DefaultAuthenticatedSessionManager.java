@@ -28,6 +28,11 @@ public final class DefaultAuthenticatedSessionManager implements AuthenticatedSe
 
     @Override
     public AuthenticatedSession authenticate(AuthMessage msg) throws IOException {
+        return authenticate(msg, null);
+    }
+
+    @Override
+    public AuthenticatedSession authenticate(AuthMessage msg, Runnable beforeTargetConnect) throws IOException {
         long now = System.currentTimeMillis() / 1000L;
         long timeDiff = Math.abs(now - msg.getTimestamp());
         if (timeDiff > authTimeWindowSeconds) {
@@ -65,9 +70,17 @@ public final class DefaultAuthenticatedSessionManager implements AuthenticatedSe
         }
 
         try {
+            // 认证已成立：此刻就通知调用方（发 ACK），不能等 tunnel.open()。
+            // 目标库建连是唯一可能长阻塞的一步；它失败时客户端会收到 close 帧，
+            // 但认证层结论必须已经及时送达，否则健康检查只会报「认证超时」，
+            // 把「数据库连不上」这个真实原因完全掩盖掉。
+            if (beforeTargetConnect != null) {
+                beforeTargetConnect.run();
+            }
             MySqlConnection mysql = tunnel.open(target);
             return new AuthenticatedSession(target, mysql);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // 回调抛异常同样视为认证失败：容量必须回滚，否则会静默泄漏槽位。
             counter.decrementAndGet();
             throw e;
         }
